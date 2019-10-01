@@ -1,0 +1,147 @@
+---
+title: "Tire Brand Analysis"
+author: "Carly Lundgreen"
+date: "September 28, 2019"
+output: pdf_document
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.pos="H",fig.width=4,fig.height=3)
+library(dplyr,quietly=TRUE)
+library(kableExtra,quietly=TRUE)
+library(ggplot2)
+library(gridExtra,quietly=TRUE)
+library(broom, quietly=TRUE)
+library(purrr, quietly=TRUE)
+library(knitr,quietly=TRUE)
+```
+
+```{r,include=FALSE}
+##read in and manipulate data
+tires <- read.csv("C:/Users/Carly/Documents/Semester 8/Nonparametric stats/Tires.csv")
+head(tires)
+diffs <- data.frame(tires$Flatt-tires$Firetire)
+colnames(diffs) <- c("Difference")
+tire_company <- c(rep("Flatt",20),rep("Firetire",20))
+Cars <- c(seq(1:20),seq(1:20))
+Avg_wear <- c(tires$Flatt,tires$Firetire)
+long_tire_dat <- data.frame(Cars,Company=tire_company,Wear=Avg_wear) #convert to long format
+```
+
+# Introduction
+
+Tire companies are always interested in the amount of wear that their tires go through. The consumer is also concerned about the longevity of their tires. Two tire brands, Flatt and Firetire, are being compared to test for differences in tire wearability. The goal of this analysis will be to determine whether tire brand makes a difference in tire wear, measured by average wear in thousandths of an inch.  
+
+## Statistical Hypotheses
+
+In order to determine whether tire brand makes a difference in the amount of tire wear, we will establish the following hypotheses:
+
+$$H_0: \mu_{A - B} = 0$$
+$$H_A: \mu_{A - B} \neq 0$$
+
+Where $\mu_{A-B}$ represents the difference in mean tire wear between Flatt (group A) and Firetire (group B).
+
+## Methodology and Procedures
+
+The strategy for this analysis is to first perform a standard paired t-test on the differences in tire wear between the two groups. This test will allow us to reject or fail-to-reject the null hypothesis ($H_0$) stated above by comparing the calculated p-value to an alpha level that we will specify below. To augment this analysis, we will also perform a Wilcoxon Signed Rank test, the non-parametric equivalent of the paired t-test. The hypotheses for this test are as follows: 
+
+$H_0:$ The differences of average tire wear between the brands follow a symmetric distribution around zero
+$H_A:$ The differences of average tire wear between the brands do not follow a symmetric distribution around zero.
+
+By comparing the p-value for this test to our significance level, we can then reject or fail-to-reject the non-parametric $H_0$. 
+
+### Level of Significance 
+
+We will set the level of significance for this analysis as $\alpha = 0.05.$
+
+## Data Description and Exploratory Data Analysis
+
+Ten (twenty?) cars were chosen for the test, and twenty (forty?) tires were chosen at random from each tire company. Two tires from each company were placed on each car, one in front and one in back. The side of the car that the tire was placed on was assigned randombly.The cars drived normally for 6 months, after which the average wear recorded for the company for each of the cars. The data is the average wear (in thousandths of an inch) that took place for each brand on each car. 
+
+## Exploratory Plots 
+
+```{r echo=FALSE,fig.cap="This figure plots the average wear for the companies Flatt and Firetire against each other. 20 cars were involved in the test, and twenty datapoints are plotted. ",fig.align='center'}
+ggplot(data=tires,aes(x=Flatt,y=Firetire)) + geom_point(size=2,pch=19) + 
+  geom_abline(slope=1,intercept=0,col="red",lty="dashed",size=1) +
+  theme_bw() + ggtitle("Plot of Paired Tire Data") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+This plot is a preliminary picture of the paired data. If the average wear were the same for both companies, the points would all fall onto the red line. We can see that the values vary around the line, but a statistical test is required to determine whether these differences are real or just due to chance.
+
+```{r,echo=FALSE,warning=FALSE,error=FALSE,fig.cap="These plots display histograms of the test scores for teaching methods A and B.",fig.align='center'}
+ hist1 <- ggplot(data=diffs, aes(x=Difference)) +
+        geom_histogram(binwidth=7,fill="red2",color="black") + labs(x="Difference in Avg Wear (Flatt-Firetire)",y="Frequency") +         theme_bw()
+
+```
+
+We can see that the differences appear to follow a relatively normal (perhaps slightly left-skewed) distribution. 
+
+```{r echo=FALSE, fig.cap = "This figure shows a density plot of the differences in average tire wear for the two brands.",fig.align='center'}
+dens1 <- plot(density(diffs$Difference),xlab="Difference in Wear (Flatt - Firetire",main="Densities of Tire Wear",col="red", lwd=2)
+
+```
+
+Looking at the density plot for the differences, we can see that the differences in these sample data don't appear to follow a normal distribution. The sample data is clearly not single-peaked, and isn't symmetric either. This gives me some pause as I approach a paired t-test, which assumes the differences come from a normal distribution.
+
+## Summary Statistics 
+The following table provides numerical summaries for the differences in average tire wear (Flatt-Firetire).
+
+```{r echo=FALSE}
+diffs_summary <- c(mean(diffs$Difference), sd(diffs$Difference),median(diffs$Difference), IQR(diffs$Difference))
+diffs_summary <- diffs_summary %>% as.data.frame()
+rownames(diffs_summary) <- c("Mean","SD","Median","IQR")
+colnames(diffs_summary) <- c()
+diffs_summary <- diffs_summary %>% round(3)
+
+kable(diffs_summary)
+```
+
+
+Both the mean and median of the differences in tire wear (Flatt - Firetire) are negative, indicating that Firetire, on average, seems to have more tire wear than Flatt for our sample.
+
+# Results
+
+Below are the results of a two sample t-test and Mann-Whitney U test on the test scores of groups A and B. A 95% confidence interval estimate for the 
+```{r echo=FALSE,warning=FALSE,message=FALSE}
+#perform two sample t-test to compare the scores of both groups
+t_test <- t.test(tires$Flatt,tires$Firetire,paired=TRUE) 
+#perform mann-whitney U test to compare the scores 
+w_test <- wilcox.test(tires$Flatt,tires$Firetire,conf.int=FALSE,correct=FALSE,paired=TRUE) 
+
+tab <- map_df(list(t_test), tidy) %>% as.data.frame()
+tab3 <- map_df(list(w_test),tidy) %>% as.data.frame()
+tab <- tab[c("estimate","statistic", "p.value", "conf.low","conf.high")]
+tab3 <- tab3[c("statistic","p.value")]
+colnames(tab) <- c("Estimate","Test_Statistic", "P-value","Lower","Upper")
+tab <- tab %>% round(4)
+
+Test <- c("Paired t") 
+Test_Name <- c("Wilcoxon") 
+tab2 <- cbind(Test,tab)
+tab4 <- cbind(Test_Name,tab3)
+
+kable(tab2)
+kable(tab4)
+```
+
+In order to prove whether the mean difference for the wear in tires is truly different than 0 (Firetire tires have more wear than Flatt tires), we performed a paired t-test. This test calculates a test statistic, t, and the p-value is then calculated to be the probability of actually obtaining this test statistic if the means for the groups were equal. The Wilcoxon test does not compare the means of the populations, but rather the distribution of the differences. First, the data are pooled together, ordered, and ranked. If the distributions is centered around zero, then we will expect to see a large test statistic, which would in turn lead to a significant p-value. We performed these tests using the appropriate R functions: `t.test` and `wilcox.test`. 
+
+# Conclusions
+
+## Provide and Explain Conclusions
+The p-value of the paired t test was `r tab2[1,4] %>% round(4)` while the p-value for the Wilcoxon test was `r tab4[1,3] %>% round(4)`. Both of these p-values are, firstly, very close together, and secondly, greater than our significance level of 0.05, which leads us to fail-to-reject both null hypotheses. There is not significant evidence that average wear for Flatt tires is significantly different than the average wear for Firetires. A 95% confidence interval for the true mean difference in tire wear ($\mu_{A -B}$) was reported to be (`r tab[1,4]`, `r tab[1,5]`). Because 0 is contained in this interval, we can conclude that tire brand doesn't appear to affect tire wear. The results of the Wilcoxon test indicate that the distribution of differences for Flatt and Firetire average wear is likely centered around zero. We do not have sufficent evidence to the contrary. 
+
+### Questions
+I would be interested to know the kinds of cars that participated in the study. A truck's "normal driving" may look different than a smaller car's "normal driving." Secondly, I would ask if it would be possible to gather more cars to participate in the analysis, meaning more tires from both companies would be needed. This would decrease the effects of chance variation even more and thus provide more accurate results.
+
+
+### Nonparametric vs. Parametric Methods
+The biggest difference between non-parametric and parametric methods is that non-parametric methods require less conditions to be checked before conducting a test. With a paired t-test, we don't have reasonable evidence that the scores from both groups came from a normal distribution. The Wilcoxon test requires no such condition.The results that we got from this dual analysis turned out to be almost exactly the same, and led to, essentially, the same conclusions. However, the differences did not appear to follow a normal distribution. Any parametric test would need to be done with caution, but the Wilcoxon test can proceed either way. It would be most efficient to simply run a Wilcoxon test and skip the paired t-test. However, parametric tests usually provide more statistical power than nonparametric tests, so this would be a potential trade off of choosing the Wilcoxon analysis.
+
+
+## Recommendations
+I would recommend, first, a larger sample size. This would lead to an increase in power. I would also recommend a longer trial period, perhaps a year rather than 6 months, for the experiment. The first change, though, would be to increase the sample size. Another recommendation would be to add in another tire brand, or maybe even multiple tire brands to provide for increased comparison options among brands of tire wear.
+
+Future studies could include these added tire brands. However, pairing these data would be more complex, time consuming, and likely more expensive. It would be interesting to see the scope of the effect of tire brand on tire wear across vehicle type as well. A block design, where blocks are certain types of vehicles, might provide interesting results. 
