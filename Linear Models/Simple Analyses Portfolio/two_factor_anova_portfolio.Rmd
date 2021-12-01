@@ -1,0 +1,162 @@
+---
+title: "Benzodiazepines and Memory:"
+subtitle: "Two-Way Analysis of Variance"
+author: "Carly Lundgreen"
+output: pdf_document
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.pos="H")
+options(scipen=999) #suppress scientific notation
+setwd("~/Grad_School/535")
+```
+
+```{r echo=FALSE,include=FALSE}
+library(dplyr)
+#library(formattable)
+library(ggplot2)
+library(kableExtra)
+library(usmap)
+library(gridExtra)
+library(xtable)
+library(ggpubr)
+library(car)
+```
+
+# Introduction and Data Description 
+
+Harvard Medical School reported on a study a study performed by a team of researchers from France and Canada which linked benzodiazepine use to an increased risk of being diagnosed with Alzheimer's disease. In the study, the greater people's cumulative dose of benzodiazepines, the higher their risk. However, this was not a randomized clinical trial, so causation could not be established. We are interested in determining whether the effects of these anti-anxiety medications on memory depend on the dosage and type of drug. In other words, we are interested in whether the effect of the type of benzodiazepine on memory depend on the dosage of the medication.
+
+While we do not have data about Alzheimer's disease risk and benzodiazepine usage, we did retrieve a dataset that compares memory test scores for 132 subjects who took a randomly assigned drug every day for one week.This dataset was retrieved from Kaggle, which offers a public data platform off of which we accessed this data. Citations are included in the appendix of this portfolio. The subjects took the memory test before the study period began, and then took the test after the period ended. The scores were recorded for each subject. The two drugs in this study were Alprazolam (Xanax) and Triazolam (Halcion). A placebo was also utilized, but we opted to compare only the two drugs. Each drug had three dosage levels: 1, 2, and 3. For Alprazolam, the levels were, in order: 1mg, 3mg, and 5mg. For Triazolam, the levels 1, 2, and 3 were 0.25mg, 0.5mg, and 0.75mg, respectively. Our response variable for this analysis will be the difference in test score for each subject (after taking the medication minus before taking the medication). A negative difference indicates that the test score decreased after taking the medication, and vice versa. 
+
+# Exploratory Data Analysis
+```{r echo=FALSE}
+med <- read.csv("islander_data.csv",sep=",",header=TRUE)
+med <- med[,c(5,6,9)]
+med$Dosage <- as.factor(med$Dosage)
+#I don't want to worry about the placebo group, so I'm going to remove it
+med <- med[med$Drug != "S",]
+```
+
+Figure 1, displayed below, illustrates the distribution of test score differences for combinations of drug and dosage. Note that the drug label "A" indicates Alprazolam and "T" indicates Triazolam. We can see that the distributions for each of these drug/dosage combinations are comparable in spread. The median test score difference for Triazolam appeared to be approximately zero for every dosage level, while the median test scores for Alprazolam appear to differ greatly depending on dosage. 
+```{r echo=FALSE,fig.height=3,fig.width=4.5,fig.align="center",fig.cap="Boxplots comparing test score differences by drug and dosage"}
+#check assumptions
+#Assumptions
+#constant variance? 
+bplot <- ggboxplot(med, x = "Drug", y = "Diff", 
+          color = "Dosage",
+          ylab = "Test Score Difference", xlab = "Drug",
+          ggtheme = theme_bw(),lwd=1) + 
+          scale_colour_brewer(palette="Set1", direction=-1)
+bplot
+```
+
+Figure 2, below, displays the mean test score difference for each combination of drug and dosage level. It does appear that the anti-anxiety drugs' effects on memory depend on the dose of the respective medication. For example, on dosage level 1 of Alprazolam (Xanax), the after-before difference in test score was just about zero, so there wasn't really an effect on memory in that case. However, the test score difference was very positive for Xanax at dose 3, indicating that the average test score greatly improved after subjects took that drug. Interestingly, Triazolam (Halcion) at dose levels 1 and 3 were associated  with a decrease in the average memory test score after taking that drug at those dose levels, while dose level 2 appears to be associated with an increase in test score. Perhaps Triazolam has an 'ideal' dose range, where doses outside of that range are associated with decreased memory recall. This is in contrast to Alprazolam, which seems to have positive effects no matter the dose range, but an extremely positive effect at the highest dose level. 
+
+```{r echo=FALSE, fig.width=4.5,fig.height=3,fig.cap="Plot of the mean test score differences for each drug/dosage combination"}
+#interaction plot
+med %>% 
+  ggplot() +
+  aes(x = Drug, color = Dosage, group = Dosage, y = Diff) +
+  stat_summary(fun = mean, geom = "point",size=2) +
+  stat_summary(fun = mean, geom = "line",size=1) + 
+  labs(y="Mean Test Score Difference") + 
+  theme_bw() + scale_colour_brewer(palette="Set1", direction=-1)
+
+```
+
+Table 1 below illustrates summary statistics for the difference in test scores by drug and dosage level. The group that obviously stands out the most within this table is the A:3 group, which is Alprazolam at Dosage level 3 (5mg). The mean test score difference is 22.641, which is far higher than the rest of the groups. We observed this in the interaction plot above. The difference between this group and the rest is so high that as a point of further analysis we might consider returning to the data source to make sure there was not a misstype in the dataset. For now, we assume that the data measurement is correct and proceed with the analysis.
+
+```{r echo=FALSE}
+summaries <- group_by(med,Drug,Dosage) %>%
+              summarise (
+                Count = n() %>% round(3),
+                Mean = mean(Diff) %>% round(3),
+                SD = sd(Diff) %>% round(3),
+                Median = median(Diff) %>% round(3)
+                )
+
+kable(summaries) %>% kable_styling(position="center",latex_options="hold_position")
+```
+
+# Analysis 
+
+We want to find out if there is a statistically significant interaction between `Drug` and `Dosage` on the difference in memory recall test score. To do this, we will utilize a two-factor analysis of variance (ANOVA). We will test the following hypotheses: 
+
+$$H_{o}:\ There\ is\ no\ interaction\ between\ drug\ and\ dosage\ level\ $$
+$$H_{a}:\ There\ is\ an\ interaction\ between\ drug\ and\ dosage\ level\ $$
+```{r echo=FALSE}
+#Assumptions
+#one-way anova test
+#model.tables(anova_test, type="means", se = TRUE)
+anova_test <- aov(Diff~Drug*Dosage,data=med)
+red_mod <- lm(Diff~Drug + Dosage,data=med)
+full_mod <- lm(Diff~Drug*Dosage,data=med)
+v_test <- leveneTest(Diff~Drug*Dosage,data=med)
+v_pval <-  v_test$`Pr(>F)`[1] %>% round(3)
+#variances not sig different
+#normality
+# Extract the residuals
+aov_residuals <- residuals(object = anova_test )
+# Run Shapiro-Wilk test
+test_norm <- shapiro.test(x = aov_residuals ) #normality not violated
+#summary(anova_test)
+#anova(red_mod,full_mod)
+
+```
+Before proceeding with the test, however, we will check that the assumptions of the two-way ANOVA test are met. First, we will make sure that the normality condition is met. This condition requires that the distributions of test score differences are normally distributed for each group. Because we have six different drug/dosage combinations, we will instead fit our ANOVA model and look at the distribution of residuals from the ANOVA. A histogram of the residuals is displayed below in Figure 3. This histogram certainly appears normal, but we will utilize a Shapiro-Wilk test for normality to confirm our assumption. The p-value from the Shapiro-Wilk test was found to be `r test_norm$p.value`, which is not significant at the 0.05 level, so we fail to reject the null hypothesis that the residuals are normally distributed. The normality assumption appears to be sufficiently met.
+```{r echo=FALSE,fig.width=4,fig.height=2.5,fig.align="center",fig.cap="Histogram of Residuals from ANOVA test"}
+#plot historam of residuals
+ggplot(med,mapping=aes(x=aov_residuals)) + geom_histogram(aes(y=..density..),color="white",fill="steelblue3",bins=25) + 
+  geom_density(lwd=0.8) + labs(x="Residuals",y="Count") + theme_bw()
+
+```
+
+Secondly, we check the condition of equal variaince across comparison groups. We utilized Levene's test for homogeneity of variance to determine whether the variance of test score differences is the same across drug/dosage groups. This test returned a p-value of `r v_pval`, which led us to fail to reject the null hypothesis that the variances are homogenous across groups. We believe the assumption of equal variance is sufficiently met, so we finally check the assumption of independence, which requires that the memory test score differences are independent from subject to subject. Because the test was given in controlled conditions, we believe that each person's test score was independent of the rest. Because we have confirmed that the assumptions have been met for this scenario, we will finally report the results of the ANOVA test in the table below. 
+
+
+```{r results = 'asis',echo=FALSE,fig.align="center"}
+tab <- xtable(anova_test)
+print(tab, comment=FALSE)
+```
+
+We can see that the p-value for the interaction between Drug and Dosage is effectively zero, which is obviously significant at the 0.05 level, so we conclude that there is a significant interaction between Drug and Dosage on the difference in memory test scores. The effects are also significant for Drug and Dosage alone, with p-values effectively zero for each of the main effects. To analyze which Drug/Dosage combinations are contributing to this interaction effect, we will look at pairwise confidence intervals, shown in the plot below. 
+```{r echo=FALSE}
+#look at pairwise intervals
+diffs <- TukeyHSD(anova_test)$`Drug:Dosage`[,1:3] %>% round(3)
+#kable(diffs) %>% kable_styling(position="center")
+
+a_3 <- vector()
+for (i in 1:length(rownames(diffs))){
+  a_3[i] <- grepl("A:3", rownames(diffs)[i], fixed = TRUE)
+}
+```
+
+```{r echo=FALSE,fig.align="center",fig.width=6,fig.height=3}
+df <- data.frame(x=seq(1,15,by=1),
+                 est = diffs[,1],
+                 lowvals = diffs[,2],
+                 upvals = diffs[,3],
+                 is_a3 = a_3)
+colnames(df) <- c("x","est","lowvals","upvals","A:3 Involved")
+names_ints <- c(rownames(diffs))
+ggplot(df, aes(x = names_ints, y = est)) +
+  geom_point(size=1.5) +
+  geom_errorbar(aes(ymax = upvals, ymin = lowvals,color=`A:3 Involved`)) + 
+  geom_hline(yintercept=0, linetype="dashed", color="red",size=1) +
+  labs(y="Difference in Means",x="Drug:Dosage Differences") + 
+  theme(axis.text.x = element_text(angle = 90)) + coord_flip() + theme_bw() + 
+  theme(axis.text.x = element_text(angle = 0)) + 
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  scale_colour_brewer(palette="Set1",direction=-1)
+
+```
+
+We can see that every interval where the A:3 interaction was involved, there was a significant difference in mean test score. All the other confidence intervals contain zero, indicating that the difference in mean test score was not significant. These are the intervals displayed in red. The Alprazolam 5mg combination appears to be the source of the significant interaction between drug and dosage. 
+
+# Conclusion 
+
+As stated above, it appears that the Alprazolam at 5mg was the major factor level combination leading us to conclude that there is a significant interaction between drug and dosage on memory recall test scores. As mentioned previously, we would be interested to find out whether there was a misstype in the data, or if the difference in test scores were really that large for those subjects taking 5mg of Alprazolam. If the data was correct, then Xanax leads to an incredibly large boost of memory after taking 5 mg for a week. At other drug/dosage level combinations, it doesn't appear that there were was much of a difference in test score after taking the drug for a week. We would probably recommend another study design that has subjects take the drug for a longer period, as most anti-anxiety/anti-depressants have side effects that take 1-3 weeks (or more) to "settle down" after beginning to take the medication for the first time. These side effects could have contributed to the memory test scores. A final note about the data--we didn't have much information about the subjects that participated in the study. The only information given was that they were 'islanders'. This could have many meanings, and it also prevents us from generalizing any of these results beyond the islander population. We also recognize that only two benzodiazepines were considered in this study, so it is very likely that other benzodiazepines have differing, and likely more significant, effects on memory. 
+
+
+

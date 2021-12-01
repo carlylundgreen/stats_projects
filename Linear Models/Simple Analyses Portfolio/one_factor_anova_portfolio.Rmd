@@ -1,0 +1,157 @@
+---
+title: "Opioid Prescription Rates:"
+subtitle: "One-Way Analysis of Variance"
+author: "Carly Lundgreen"
+output: pdf_document
+fig_caption: yes
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.pos="H")
+options(scipen=999) #suppress scientific notation
+setwd("~/Grad_School/535")
+```
+
+```{r echo=FALSE,include=FALSE}
+library(dplyr)
+#library(formattable)
+library(ggplot2)
+library(kableExtra)
+library(usmap)
+library(gridExtra)
+library(car)
+library(xtable)
+```
+
+# Introduction and Data Description 
+
+Many have heard of the current 'Opioid Crisis' that the United States is currently facing. The U.S. Department of Health and Human Services reports that more than 130 people die from opioid-related drug overdoses every day. But it's not just the general public that face these issues; the National Institute on Drug Abuse reports that more than 1 in 10 veterans who seek care at the U.S. Veteran's Administration meet the criteria to be diagnosed with a substance use disorder (including opioid addiction). This fact becomes the basis for our analysis. We are interested in discovering whether opioid prescription rates differ between different regions of the United States. The U.S. Department of Veteran's Affairs released data opioid prescription rates at 146 Veteran's Affairs (VA) facilities from 2018. We have classified each of these facilities, based on the state they are located in, into one of four U.S. Census-designated regions: Northeast, Midwest, South, and West. Because we plan to analyze differences in the average opioid prescription rate for each of thes regions, we will perform a one-factor analysis of variance to answer our question. 
+```{r echo=FALSE}
+rates <- read.csv("opioid.csv",header=TRUE,sep=",")
+rates <- rates[!(rates$state_postal == "PI"),] #drop value from Philippines
+rates <- rates[!(rates$state_postal == "PR"),] #drop value from Puerto Rico
+rate <- rates$X2018.Prescribing.Rate %>% as.data.frame()
+state <- rates$state_postal %>% as.data.frame()
+
+dat <- cbind(rate,state) %>% as.data.frame()
+colnames(dat) <- c("rate","state")
+
+region <- vector()
+for (i in 1:nrow(dat)){
+  if(dat$state[i] %in% c("CT","MA","ME","NH","RI","VT","NJ","NY","PA") == TRUE){
+  region[i] <- "northeast"          
+  } else if (dat$state[i] %in% c("IL","IN","MI","OH","WI","IA","KS","MN","MO","NE","ND","SD") == TRUE){
+    region[i] <- "midwest"
+  } else if (dat$state[i] %in% c("DC","DE","FL","GA","MD","NC","SC","VA","WV","AL","KY","MS","TN","AR","LA","OK","TX") == TRUE){
+    region[i] <- "south"
+  } else if (dat$state[i] %in% c("AZ","CO","ID","MT","NV","NM","UT","WY","AK","CA","HI","OR","WA") == TRUE){
+    region[i] <- "west"
+  }
+}
+
+dat$region <- region
+```
+
+# Exploratory Data Analysis 
+
+The plots below show a map displaying average opioid prescription rates at VA facilities in 2018 and paired boxplots that compare the distributions of opioid prescription rates by U.S region. From the map, we can see that the average prescription rate in Idaho is over 12.5%, while the average Prescription rates in Texas or Florida, for example, are much lower than that. Figure 2, also shown below, displays. The boxplots show that the West region appears, in general, to have the highest prescription rates in comparison to other regions, while the Northeast appears to have the lowest. When comparing the mean rates for each region, this is certainly the case. The spread of the prescription rates also appears to differ between regions, so we will need to consider this in the next section. 
+```{r echo=FALSE, fig.width=9,fig.height=3.5, fig.cap = "Map of average opioid prescription rates per state at VA facilities in 2018 and paired boxplots showing distribution of rate by group"}
+#table(dat$region) #sample size per group
+
+get_mean <- group_by(dat,state) %>%
+              summarise (
+                Mean = mean(rate))
+get_mean <- as.data.frame(get_mean)
+avg_rates_ordered <- get_mean[order(get_mean$Mean),] 
+
+#identify clusters?
+p1 <- plot_usmap(regions = "state",data=get_mean,values="Mean") + 
+  labs(title = "Average Opioid Prescription Rates at VA Facilities in 2018") +
+  scale_fill_continuous(low = "lightblue", high = "darkblue",name=" Avg Rate") + 
+  theme(legend.position = "right")
+
+region <- dat$region
+rate <- dat$rate
+p2 <- ggplot() + geom_boxplot(mapping=aes(x=region,y=rate,fill=region)) + 
+   labs(x="Region",y="Opioid Prescription Rate") + 
+  scale_fill_brewer(palette="Paired",name="Region") + theme_bw()
+
+grid.arrange(p1,p2,ncol=2)
+```
+
+Table 1, displayed below, displays summary statistics of opioid prescription rates for each of the 4 regions. Interestingly, The median rates for the Midwest and South regions are the same (when rounded to three decimal points). We can see that the mean rate is a bit higher for the South, however, which is consistent with the slight right-skewness seen in the boxplot for the South from Figure 2.
+
+```{r echo=FALSE}
+summaries <- group_by(dat,region) %>%
+              summarise (
+                Mean = mean(rate) %>% round(3),
+                SD = sd(rate) %>% round(3),
+                Median = median(rate) %>% round(3), 
+                IQR = IQR(rate) %>% round(3), 
+                Min = min(rate) %>% round(3), 
+                Max = max(rate) %>% round(3))
+kable(summaries,caption="Summary Statistics of Prescription Rates by Region") %>% kable_styling(position="center",latex_options="hold_position")
+```
+
+# Analysis
+We will utilize a one-factor analysis of variance (ANOVA) to compare the mean presecription rates between regions. The hypotheses for this test are as follows: 
+
+$$Ho: \mu_{MW} = \mu_{NE} = \mu_{S} = \mu_{W} $$
+$$Ha: At\ least\ one\ mean\ is\ different\ from\ the\ rest\ $$
+Where each $\mu$ is the mean prescription rate at VA facilities in 2018 for the respective region, which is designated by the subscript on $\mu$. 
+```{r echo=FALSE}
+#Assumptions
+#one-way anova test
+dat$region <- as.factor(dat$region)
+anova_test <- aov(rate~region,data=dat)
+v_test <- leveneTest(rate~region,data=dat)
+v_pval <-  v_test$`Pr(>F)`[1] %>% round(3)
+#variances different..
+#normality
+# Extract the residuals
+aov_residuals <- residuals(object = anova_test )
+# Run Shapiro-Wilk test
+test_norm <- shapiro.test(x = aov_residuals )#normality not violated
+
+```
+
+Before proceeding with the analysis, we first need to check the assumptions of a one-way ANOVA. The first assumption that we will check is that the distribution of rates for each region is approximately normal. To test this, we opted to run the ANOVA and simply extract the residuals from the test. If these residuals are sufficiently normal, then the normality condition is met. After extracting the residuals, we performed a Shapiro-Wilk test for normality on the residuals. The null hypothesis of this test is that the sample came from a normally distributed population. The p-value for the Shapiro-Wilk test was `r test_norm$p.value`, so we fail to reject the null hypothesis and conclude that the condition of normality is met. 
+
+The second assumption we checked was that the variances of rates for each region are equal. To check this condition, we utilized Levene's test for homogeneity of variances. The null hypothesis of this test is that population variances are equal (ie the variance of rates are the same for each of the four regions). After conducting the test, we calculated a p-value of `r v_pval`, which is significant at the 0.05 level, indicating that there is likely a difference in variances between groups. This is a potential place for further analysis, where a transformation of our response variable or different definitions of U.S. regions may be considered. For our purposes now, we will proceed with the analysis, keeping in mind this assumption. 
+
+Finally, we consider independence. We believe it is reasonable to assume that prescription rates are independent between VA facilities, so we will assume that independence is a valid assumption here. 
+
+The results of our ANOVA test are shown in the table below. We can see that the p-value is less than the significance level of 0.05, so we reject the null and conclude that at least one U.S. region's average opioid prescription rate at VA facilities in 2018 differs from the other regions. 
+
+```{r echo=FALSE,results='asis'}
+anova_test <- aov(rate~region,data=dat)
+tab <- summary(anova_test)
+print(xtable(anova_test),comment=FALSE)
+```
+
+The plot below illustrates 95% confidence intervals for the differences in mean prescription rates for each of the six possible pairs of regions. We can see that the intervals for the difference of mean prescription rates for West-Midwest, West-Northeast, and West-South are all greater than zero, indicating that the mean prescription rate for the West is significantly higher than the other regions. We can make a similar observation about the Northeast-Midwest pairing, where the interval is less than zero. The Midwest region has a significantly higher mean prescription rate than the Northeast. There is not a significant difference in average perscription rate between the South and the Midwest, because the confidence interval contains zero. This is consistent with our observation made in Table 1, where the median prescription rates for these two regions were the same. 
+
+```{r echo=FALSE,fig.width=3.5,fig.height=3}
+
+diffs <- TukeyHSD(anova_test)$region[,1:3]
+#kable(diffs) %>% kable_styling(position="center")
+
+df <- data.frame(x =c(1,2,3,4,5,6),
+                 est = diffs[,1],
+                 lowvals = diffs[,2],
+                 upvals = diffs[,3])
+ggplot(df, aes(x = as.factor(x), y = est)) +
+  geom_errorbar(aes(ymax = upvals, ymin = lowvals),width=0.2,color="darkblue",lwd=0.6) +
+  geom_point(size=1.5,color="red") +
+  geom_hline(yintercept=0, linetype="dashed", color="red",size=1) +
+  labs(y="Difference of Means",x="") +
+  scale_x_discrete(breaks = c("1","2","3","4","5","6"), labels=c("NE-MW","S-MW","W-MW","S-NE","W-NE","W-S")) +
+  theme_bw()
+
+```
+
+# Conclusion
+
+It appears that VA facilities in the West had a higher average prescription rate than VA facilities in the Northeast, South, and Midwest. We also wanted to note that we opted to utilize government-designated regions because the data originated from a government organization. There are likely other regional definitions that would be perfectly reasonable and acceptable, and where we would not run into the problem of unequal variances within groups. The variance assumption leaves this analysis open for further tweaking and exploration. Perhaps a transformation of the rate may help allow us to conclude that the variances are equal across groups. Either way, this analysis does show that opioids are being prescribed at VA facilities all across the United States. With the current opioid addiction crisis in the country, and among veterans, these data take on new meaning, and the relatively high prescription rates in the West open the door to further questions regarding substance abuse control across the country. 
+
+

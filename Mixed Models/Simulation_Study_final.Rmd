@@ -1,0 +1,382 @@
+---
+title: "F Test vs. Likelihood Ratio tests"
+subtitle: "Comparing Results when the Number of Replications Differ "
+author: "Carly Lundgreen"
+output: pdf_document
+---
+
+# Introduction
+
+When attempting to discern whether levels of particular treatments (or comparison groups) have significant effects, both the  F test and the Likelihood Ratio test are valid approaches. Both approaches allow researchers to obtain test statistics for hypothesis tests. The null and alternative hypotheses ($H_{0}$ and $H_{a}$ respectively) depend on the inference question at hand. When attempting to evaluate whether levels of a treatment have a significant effect on the response, it is useful to consider 'contrasts' of the $\beta$, the vector of effects that has dimensions px1, where p is the number of unique treatment combinations or groups. The idea behind the Likelihood Ratio test is to compare two models, one that includes the effect(s) of interest and one that does not. These approaches will be discussed more in the **Methods** section.
+
+We are interested in discovering whether changing the number of replications per group/combination of treatments has an effect on the results of the F test or the Likelihood ratio test when evaluating whether treatments, and their interaction, have a significant effect on the response. 
+
+# Data 
+
+We will conduct a simulation study to answer our research question. The data to be generated will assume the form of a 2x2 factorial experiment with treatments A and B, each with 2 levels. On each block, there will be 2 replications per treatment combination, for 8 observations per block. We will assume that there are 3 blocks, for a total of 24 observations.
+
+Now, we will repeat the same scenario (2x2 factorial experiment with 3 blocks) for 10, 30, and 50 replications per treatment combination. There will be four datasets of 24, 120, 360, and 600 observations each. Let the true treatment means for the six experimental combinations be: $\mu_{A1B1}$ = 92, $\mu_{A1B2}$ = 93, $\mu_{A2B1}$ = 98, $\mu_{A2B2}$ = 99. Let $\sigma^2_{error}$ = 16 and $\sigma^2_{block}$ = 20. 
+
+After generating these 4 preliminary datasets, we will generate 50 datasets under each of the 4 different replication numbers and evaluate these simulated datasets using the methods described in the following section. 
+
+# Methods 
+
+The response, *y*, an nx1 vector, is distributed as follows: 
+
+$$ y = X\beta  + Zu + \epsilon, \\ \epsilon \sim N(0,R), \ u \sim N(0,G) $$
+
+Where $R = \sigma^2_{error}*I_{n}$, where n is the number of total observations, and $G = \sigma^2_{block}I_{r}$, where r is the number of blocks/random effects. Note that $R$ is an nxn matrix, $G$ is an rxr matrix, $u$ is an rx1 vector, and $\epsilon$ is an nx1 vector. The treatments are considered fixed efffects, and we only desire to make inference to these two treatments. The blocks are considered the random effects, and we desire to make inference to any possible block that could come into the data in the future. 
+
+We will calculate the F values for the generated datasets to test the null hypotheses of no treatment A effect, no treatment B effect, and no interaction between treatment A and B. This is accomplished by assigning contrast matrices that corresponded to the three previously stated null hypothesis. Contrasts are linear combinations of $\beta$ that correspond to the inference questions and can be used in the calculation of an F statistic. The null hypothesis of no treatment A effect implies that the means/effects for the two levels of A are not significantly different from one another. In other words, $H_{0}$ was that $0.5(\beta_{A1B1} + \beta_{A1B2}) - 0.5(\beta_{A2B1} + \beta_{A2B2}) = 0$. The corresponding result holds for the levels of B. 
+
+The respective contrasts to test the null hypotheses of no treatment A effect, no treatment B effect, and no interaction (the product of the two), are as follows: $C_{A} = [1/2,-1/2,1/2,-1/2]$, $C_{B} = [1/2,1/2,-1/2,-1/2]$, and $C_{I} = [1,-1,-1,1]$. These contrasts are used in the following formula to calculate the F statistic (and the p-value calculated from the cdf value at that test statistic): 
+$$ F = \frac{1}{r}(C\hat{\beta})'[\hat{V}C\hat{\beta})]^{-1}(C\hat{\beta})$$
+After calculating the F statistics and corresponding p-values, we will perform likelihood ratio tests (LRT) for each of the main effects and the interaction term. The same null hypotheses will apply. The idea behind the LRT is to fit a 'reduced' model that does not include the factors/effects that we want to test and a 'full' model that includes all factors. If $H_{0}$ is true, then we would expect that the likelihood function of the reduced model will not differ significantly from the likelihood function at the full model. The full model is estimating parameters that do not improve the fit to the data (assuming $H_{0}$ is true.) After fitting these two models, we calculate $-2loglik(reduced) - (-2loglik(full))$, or the difference between residual and null deviance. This value follows a $\chi^2$ distribution with $df_{1} = r$ and $df_{2} = n-r$. Using this result, we calculated p-values from the LRT. Note that maximum likelihood (ML) was used, rather than restricted maximum likelihood (REML), to calculate the estimates of $\beta_{i}$. This was to keep the analysis simple. A further analysis comparing REML to ML may be interesting.  
+
+#Results 
+
+```{r echo=FALSE,include=FALSE,message=FALSE,warning=FALSE}
+library(MASS)
+library(dplyr)
+library(lme4)
+library(nlme)
+library(ggplot2)
+library(reshape2)
+library(gridExtra)
+library(kableExtra)
+```
+
+```{r echo=FALSE}
+set.seed(537)
+
+#function to get x matrix
+get_y <- function(nreps){
+  set.seed(537)
+#cell means model 
+x <- diag(4)
+x1 <- x[1,]
+x2 <- x[2,]
+x3 <- x[3,]
+x4 <- x[4,]
+
+X <- matrix(c(rep(x1,nreps),
+         rep(x2,nreps),
+         rep(x3,nreps),
+         rep(x4,nreps)),
+         nrow=nreps*12,ncol=4,byrow=TRUE)
+
+#given the true betas/means
+beta <- matrix(c(92,93,98,99),nrow=4,ncol=1)
+
+Z <- matrix(c(rep(x1,nreps*4),
+         rep(x2,nreps*4),
+         rep(x3,nreps*4)),
+         nrow=nreps*3*4,ncol=3,byrow=TRUE)
+
+#Generate u vec
+#sigma^2_block = 20
+zero_vec <- matrix(rep(0,3),nrow=3,ncol=1)
+#G matrix is rxr (6x6)
+G <- 20*diag(3)
+u <- mvrnorm(1,zero_vec,G)
+
+#Generate error vec
+#sigma^2_error = 16
+zero_vec2 <- matrix(rep(0,nreps*12),nrow=nreps*12,ncol=1)
+
+R <- 16*diag(nreps*12)
+err <- mvrnorm(1,zero_vec2,R)
+
+#Generate y-values
+y <- X%*%beta + Z%*%u + err
+
+#create dataset
+trts <- matrix(c(rep(c(1,1),nreps),rep(c(1,2),nreps),rep(c(2,1),nreps),rep(c(2,2),nreps)),
+               nrow=nreps*12,ncol=2,byrow=TRUE) %>% as.data.frame()
+trts
+
+block <- matrix(c(rep(1,nreps*4),rep(2,nreps*4),rep(3,nreps*4)),
+                  nrow=nreps*12,ncol=1,byrow=TRUE)
+dat <- cbind(trts,block,y)
+colnames(dat) <- c("A","B","block","y")
+
+dat
+}
+df1 <- get_y(nreps=2)
+df2 <- get_y(nreps=10) 
+df3 <- get_y(nreps=30)
+df4 <- get_y(nreps=50)
+df5 <- get_y(nreps=100)
+```
+
+The following table shows the resulting p-values from F tests using 2, 10, 30, and 50 replications per treatment combination. Out of interest, we included 100 replications as a comparison. For the test of no treatment A effect, there was a significant treatment A effect detected regardless of the number of replications. A treatment B effect was detected at 2 replications, and then the result was not significant for 10 and 30 replications. Interestingly, the effect was found to be significant again at 50 replications (and 100 as well). A significant interaction effect was never found with the F test. 
+```{r echo=FALSE}
+
+do_Ftest2 <- function(df){
+  
+df$A <- as.factor(df$A)
+df$B <- as.factor(df$B)
+fit_reml <- lme(y~ -1 + A:B, random = ~1|block,data=df,method = "ML")
+bhat <- fixef(fit_reml) %>% as.data.frame() %>% as.matrix()
+rownames(bhat) <- c()
+bhat <- bhat %>% as.matrix()
+var <- vcov(fit_reml) %>% as.matrix()
+
+C_a <- matrix(c(1/2,-1/2,1/2,-1/2),nrow=1,ncol=4,byrow=TRUE)
+
+C_b <- matrix(c(1/2,1/2,-1/2,-1/2),nrow=1,ncol=4,byrow=TRUE)
+
+C_i <- matrix(c(1,-1,-1,1),nrow=1,ncol=4,byrow=TRUE)
+
+f_stat <- function(mat){
+t(mat%*%bhat) %*% solve(mat%*%var%*%t(mat)) %*% (mat%*%bhat)
+}
+fa <- f_stat(C_a)[1]/1 #df = 1 (2 levels of trt B - 1)
+fb <- f_stat(C_b)[1]/1 #df = 1 (2 levels of trt B - 1)
+fi <- f_stat(C_i)[1]/1 #df = 1
+
+pa <- 1 - pf(fa,3,nrow(df)-3) 
+pb <- 1 - pf(fb,3,nrow(df)-3) 
+pi <- 1 - pf(fi,3,nrow(df)-3) 
+
+f_tab <- data.frame("test A"=pa,"test B"=pb,"test Interaction"=pi)
+f_tab
+}
+
+df_F2 <- rbind(do_Ftest2(df1),do_Ftest2(df2),do_Ftest2(df3),do_Ftest2(df4),do_Ftest2(df5)) %>% as.data.frame()
+df_F2 <- cbind(c(2,10,30,50,100),df_F2)
+colnames(df_F2) <- c("Repetitions","A","B","Interaction")
+df_F2 <- df_F2 %>% round(4)
+kable(df_F2) %>% kable_styling(position="center",latex_options="HOLD_position")
+```
+
+The next table shows similar results from the LRT method. There was not a significant effect of treatment A using only 2 replications per treatment, but for all other replications, the effect of A was significant. The pattern seen in treatment B is nearly the same as was observed with the F test. The interaction effect was significant for 2 replications per treatment combination, but not for higher values.  
+```{r echo=FALSE}
+
+do_LRT <- function(df){
+full_mod <- lme(y ~ -1 + A*B, random = ~1|block,data=df,method="ML")
+
+#test trt A 
+red_mod1 <- lme(y~ -1 + B, random = ~1|block,data=df,method="ML")
+#trt B 
+red_mod2 <- lme(y~-1 + A, random = ~1|block, data=df, method="ML")
+#interaction
+red_mod3 <- lme(y~ -1 + A+B,random = ~1|block, data=df,method="ML")
+
+tab9 <- data.frame("test A"=anova(red_mod1,full_mod)$`p-value`[2],
+                   "test B"=anova(red_mod2,full_mod)$`p-value`[2],
+                   "test Interaction"=anova(red_mod3,full_mod)$`p-value`[2])
+tab9
+}
+
+l1 <- do_LRT(df1) %>% round(4)
+l2 <- do_LRT(df2) %>% round(4)
+l3 <- do_LRT(df3) %>% round(4)
+l4 <- do_LRT(df4) %>% round(4)
+l5 <- do_LRT(df5) %>% round(4)
+
+df_LRT <- rbind(l1,l2,l3,l4,l5) %>% as.data.frame()
+df_LRT <- cbind(c(2,10,30,50,100),df_LRT)
+colnames(df_LRT) <- c("Repetitions","A","B","Interaction")
+kable(df_LRT) %>% kable_styling(position="center",latex_options="HOLD_position")
+```
+
+```{r echo=FALSE}
+#now, replicate 50 times 
+#function to get x matrix
+get_yvals <- function(nreps){
+#cell means model 
+x <- diag(4)
+x1 <- x[1,]
+x2 <- x[2,]
+x3 <- x[3,]
+x4 <- x[4,]
+
+X <- matrix(c(rep(x1,nreps),
+         rep(x2,nreps),
+         rep(x3,nreps),
+         rep(x4,nreps)),
+         nrow=nreps*12,ncol=4,byrow=TRUE)
+
+#given the true betas/means
+beta <- matrix(c(92,93,98,99),nrow=4,ncol=1)
+
+Z <- matrix(c(rep(x1,nreps*4),
+         rep(x2,nreps*4),
+         rep(x3,nreps*4)),
+         nrow=nreps*3*4,ncol=3,byrow=TRUE)
+
+#Generate u vec
+#sigma^2_block = 20
+zero_vec <- matrix(rep(0,3),nrow=3,ncol=1)
+#G matrix is rxr (6x6)
+G <- 20*diag(3)
+u <- mvrnorm(1,zero_vec,G)
+
+#Generate error vec
+#sigma^2_error = 16
+zero_vec2 <- matrix(rep(0,nreps*12),nrow=nreps*12,ncol=1)
+
+R <- 16*diag(nreps*12)
+err <- mvrnorm(1,zero_vec2,R)
+
+#Generate y-values
+y <- X%*%beta + Z%*%u + err
+y
+}
+
+mydat2 <- replicate(50,get_yvals(nreps=2),simplify="matrix")
+mydat10 <- replicate(50,get_yvals(nreps=10),simplify="matrix")
+mydat30 <- replicate(50,get_yvals(nreps=30),simplify="matrix")
+mydat50 <- replicate(50,get_yvals(nreps=50),simplify="matrix")
+#mydat100 <- replicate(50,get_yvals(nreps=100),simplify="matrix")
+```
+
+```{r echo=FALSE}
+
+#apply the following function to all columns of dataframes
+get_df <- function(vals,nreps){
+  y <- vals
+  trts <- matrix(c(rep(c(1,1),nreps),rep(c(1,2),nreps),rep(c(2,1),nreps),rep(c(2,2),nreps)),
+                 nrow=length(vals)*12,ncol=2,byrow=TRUE) %>% as.data.frame()
+  trts
+  
+  block <- matrix(c(rep(1,length(vals)*4),rep(2,length(vals)*4),rep(3,length(vals)*4)),
+                  nrow=length(vals)*12,ncol=1,byrow=TRUE)
+  dat <- cbind(trts,block,y)
+  colnames(dat) <- c("A","B","block","y")
+  
+  dat
+}
+
+list2 <- apply(mydat2,2,get_df,nreps=2)
+list10 <- apply(mydat10,2,get_df,nreps=10)
+list30 <- apply(mydat30,2,get_df,nreps=30)
+list50 <- apply(mydat50,2,get_df,nreps=50)
+
+```
+
+
+```{r echo=FALSE,fig.width=7,fig.height=5}
+
+## F test WITH Random effect 
+
+### 2 repetitions per trt combination:
+list_t2 <- lapply(list2,do_Ftest2)
+df_sim2 <- bind_rows(list_t2)
+
+### 10 reps per trt combo: 
+list_t10 <- lapply(list10,do_Ftest2)
+df_sim10 <- bind_rows(list_t10)
+
+### 30 reps per trt combo: 
+list_t30 <- lapply(list30,do_Ftest2)
+df_sim30 <- bind_rows(list_t30)
+
+## 50 reps per trt combo: 
+list_t50 <- lapply(list50,do_Ftest2)
+df_sim50 <- bind_rows(list_t50)
+
+df_sim2$reps <- 2
+df_sim10$reps <- 10
+df_sim30$reps <- 30
+df_sim50$reps <- 50
+
+plottingdf <- rbind(df_sim2,df_sim10,df_sim30,df_sim50)
+plottingdf$reps <- as.factor(plottingdf$reps)
+testAdf <- plottingdf[,c("test.A","reps")]
+testBdf <- plottingdf[,c("test.B","reps")]
+testIdf <- plottingdf[,c("test.Interaction","reps")]
+
+#test A 
+colnames(testAdf) <- c("Pvalue","Reps")
+g1a <- ggplot() + geom_histogram(mapping=aes(x=Pvalue, fill=Reps),data=testAdf,alpha=0.4,bins=35) + 
+  labs(title="F Test") + theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5)) 
+
+pltdatB <- melt(testBdf,id="test.B")
+colnames(testBdf) <- c("Pvalue","Reps")
+g2a <- ggplot(testBdf,aes(x=Pvalue, fill=Reps)) + geom_histogram(alpha=0.4,bins=25) + 
+  labs(title="F Test") + theme_bw() + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+colnames(testIdf) <- c("Pvalue","Reps")
+g3a <- ggplot(testIdf,aes(x=Pvalue, fill=Reps)) + geom_histogram(alpha=0.4,bins=25) + 
+  labs(title="F Test") + theme_bw() + 
+  theme(plot.title = element_text(hjust = 0.5)) 
+
+```
+
+```{r echo=FALSE}
+## LRT 
+
+### 2 repetitions per trt combination:
+list_t2 <- lapply(list2,do_LRT)
+df_sim2 <- bind_rows(list_t2)
+
+### 10 reps per trt combo: 
+list_t10 <- lapply(list10,do_LRT)
+df_sim10 <- bind_rows(list_t10)
+
+### 30 reps per trt combo: 
+list_t30 <- lapply(list30,do_LRT)
+df_sim30 <- bind_rows(list_t30)
+
+## 50 reps per trt combo: 
+list_t50 <- lapply(list50,do_LRT)
+df_sim50 <- bind_rows(list_t50)
+
+df_sim2$reps <- 2
+df_sim10$reps <- 10
+df_sim30$reps <- 30
+df_sim50$reps <- 50
+
+plottingdf <- rbind(df_sim2,df_sim10,df_sim30,df_sim50)
+plottingdf$reps <- as.factor(plottingdf$reps)
+testAdf <- plottingdf[,c("test.A","reps")]
+testBdf <- plottingdf[,c("test.B","reps")]
+testIdf <- plottingdf[,c("test.Interaction","reps")]
+
+#test A 
+colnames(testAdf) <- c("Pvalue","Reps")
+g1b <- ggplot(testAdf,aes(x=Pvalue, fill=Reps)) + geom_histogram(alpha=0.4,bins=25) + 
+  labs(title="Likelihood Ratio Test") + theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5)) 
+
+#test B
+colnames(testBdf) <- c("Pvalue","Reps")
+g2b <- ggplot(testBdf,aes(x=Pvalue, fill=Reps)) + geom_histogram(alpha=0.4,bins=25) + 
+  labs(title="Likelihood Ratio Test") + theme_bw() + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+#test I
+colnames(testIdf) <- c("Pvalue","Reps")
+g3b <- ggplot(testIdf,aes(x=Pvalue, fill=Reps)) + geom_histogram(alpha=0.4,bins=25) + 
+  labs(title="Likelihood Ratio Test") + theme_bw() + 
+  theme(plot.title = element_text(hjust = 0.5)) 
+
+```
+
+The following histograms show the p-values from 50 simulated datasets using both the F and LRT methods to analyze whether there was a significant treatment A effect (i.e. the response variable depended upon the level of treatment A). Clearly, nearly all p-values from these simulations were essentially zero. The F test and LRT behave very similarly in this scenario no matter the number of replications. 
+
+```{r echo=FALSE,fig.width=7,fig.height=2.5,fig.align="center"}
+grid.arrange(g1a,g1b,ncol=2)
+```
+
+The next set of histograms draw the same comparison between F and the LRT, only for the test of the null hypothesis of no treatment B effect. Both methods start to have some p-values creeping up above the significance level of 0.05, but the majority are still close to zero. Again, the F and LRT behave similarly here. Interestingly, it seems that the larger p-values are mostly coming from datasets that used 2 replications per treatment combination. 
+
+```{r echo=FALSE,fig.width=7,fig.height=2.5,fig.align="center"}
+grid.arrange(g2a,g2b,ncol=2)
+```
+
+The final set of plots compares F and LRT for the null hypothesis of no interaction effect. It appears that both the F and LRT had a bit more difficult time detecting a significant interaction effect, with some p-values even approaching 1. We saw this in the results from the 4 preliminary datasets with larger p-values for the test of the interaction. It appears that the number of replications are all distributed relatively evenly among these higher p-values, so it appears that the number of replications doesn't have a very large effect on the results of the F test or LRT. 
+
+```{r echo=FALSE,fig.width=7,fig.height=2.5,fig.align="center"}
+grid.arrange(g3a,g3b,ncol=2)
+```
+
+# Discussion
+
+Overall, it does not seem that changing the number of replications changes the results of the LRT or the F test. They seem to perform similarly in all cases, with the exception of detecting significant effects of treatment B for 2 replications per treatment combination. The treatments assigned in this simulation study, however, were completely arbitrary, as were the true effects and the variances. In order to determine whether the effect of the small replication number is not dependent upon the design of our experiment, it would be helpful to expand the analysis to multiple treatment designs. Another interesting point of further analysis may be to compare REML results to the ML results we observed in this analysis. Because the variance estimator given by ML is biased, this may have an effect on the results of the LRT (or the F test). This analysis only considered a few replication numbers, and only up to 50, because of the heavy computation required to simulate many large datasets and fit linear mixed effects models on these datasets. 
+
+The limitations described above are a caveat to the results of the simulation study. However, the general results indicate that the F test and the Likelihood Ratio test do not behave differently from each other for various replication numbers. In other words, the number of observations in each block will likely not change the result if you perform an F test or a likelihood ratio test to evaluate the effect of a treatment on the response. 

@@ -1,0 +1,170 @@
+---
+title: "Happiness and Alcohol Consumption:"
+subtitle: "One-Factor Analysis of Covariance"
+author: "Carly Lundgreen"
+output: pdf_document
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.pos="H")
+options(scipen=999) #suppress scientific notation
+setwd("~/Grad_School/535")
+```
+
+```{r echo=FALSE,include=FALSE}
+library(dplyr)
+#library(formattable)
+library(ggplot2)
+library(kableExtra)
+library(usmap)
+library(gridExtra)
+library(car)
+library(emmeans)
+library(xtable)
+```
+
+# Introduction and Data Description
+
+In 2016, the World Happiness Report rated Denmark as the happiest country in the world by considering variables such as log GDP per capita, healthy life expectancy at birth, freedom to make life choices, and perceptions of corruption. Because happiness is so subjective, and dependent upon likely innumerable different variables, it is notoriously difficult to measure. However, these studies of global happiness can reveal many truths about the state of the country in question and the quality of life of the people living there, regardless of how close scientists get to the "true model" of happiness. 
+
+We are interested to find out whether where you live in the world affects how happy you are. We can already infer, based on the 2016 World Happiness Report and subsequent reports (where Denmark consistently ranks among the happiest in the world), that where you live does affect your happiness level. In addition to location, however, we want to consider the effect of alcohol consumption on happiness. In other words, we want to see how world region affect happiness scores if we control for alcohol consumption. The dataset utilized in this analysis was retrieved from Kaggle, which offers a public data platform from which we accessed this data. Citations are included in the appendix of this portfolio. 
+
+Our dataset reports the average happiness score for 122 countries in the world from the year 2016. These countries were already segmented into 9 different regions (North America, Latin America/Caribbean, Eastern Asia, Southeastern Asia, Australia/New Zealand, Central/Eastern Europe, Western Europe, Middle East/North Africa, and Sub-Saharan Africa). In order to simplify the analysis, we aggregated these nine regions into just four: Americas, Asia Pacific, Europe, and Middle East/Africa. Our response variable, happiness score (`score`), was the average response of a survey of people from each country to the question "How happy are you on a scale of 1-10?" The factor, again, was `region` with 4 levels. Finally, we considered alcohol consumption as our covariate that we will control for in this analysis. There were three variables, Beer per capita, Spirit per capita, and Wine per capita, that we summed into a single variable, alcohol per capita (`alcohol_pc`). We were not able to find out whether these were the numer of beverages per capita consumed per year/month/week, so we will just consider this variable as the number of alcoholic beverages consumed per year (where 'alcoholic beverages' refers to beer, spirit, or wine). Our goal is to identify differences in average happiness score between regions, while controlling for alcohol consumption. To accomplish this, we will perform a one-factor analysis of covariance (ANCOVA) test.
+```{r echo=FALSE}
+dat <- read.csv("HappinessAlcoholConsumption.csv",header=TRUE,sep=",")
+dat$Beer_PerCapita <- as.numeric(dat$Beer_PerCapita)
+dat$Spirit_PerCapita <- as.numeric(dat$Spirit_PerCapita)
+dat$Wine_PerCapita <- as.numeric(dat$Wine_PerCapita)
+#combine regions so we have fewer levels 
+
+region <- vector()
+for (i in 1:nrow(dat)){
+  if(dat$Region[i] %in% c("Latin America and Caribbean","North America") == TRUE){
+  region[i] <- "Americas"          
+  } else if (dat$Region[i] %in% c("Australia and New Zealand","Eastern Asia","Southeastern Asia") == TRUE){
+    region[i] <- "Asia Pacific"
+  } else if (dat$Region[i] %in% c("Central and Eastern Europe","Western Europe") == TRUE){
+    region[i] <- "Europe"
+  } else if (dat$Region[i] %in% c("Middle East and Northern Africa","Sub-Saharan Africa") == TRUE){
+    region[i] <- "Middle East/Africa"
+  }
+}
+dat$region <- region
+#get alcohol per capita variable by adding Beer + Spirit + Wine per capita columns
+dat$alcohol_pc <- dat$Beer_PerCapita + dat$Spirit_PerCapita + dat$Wine_PerCapita
+
+dat <- subset(dat, select = c(region,alcohol_pc,HappinessScore) )
+colnames(dat) <- c("region","alcohol_pc","score")
+dat$region <- as.factor(dat$region)
+```
+
+# Exploratory Data Analysis
+
+The plot below displays a scatterplot of alcohol per capita by happiness score with regression lines drawn for each of the four regions that we defined during the data cleaning process. It appears that the slopes of each of these lines are positive, indicating that alcohol consumption, on average, is associated with higher happiness scores for each of the regions. The slopes are different for each region, however, indicating a differing effect for each region. For example, it appears that alcohol does not have very much of an effect on happiness in the Middle East/Africa.
+
+```{r echo=FALSE,message=FALSE,fig.width=5,fig.height=2.5,position="center"}
+ggplot(dat,aes(y = score, x = alcohol_pc, colour = region)) +
+   geom_point() + geom_smooth(method="lm", se=FALSE) + theme_bw() + 
+  labs(x="Per Capita Alcohol Consumption",y="Happiness Score")  + 
+  scale_colour_brewer(palette="Set1",name="Region") 
+```
+
+```{r echo=FALSE}
+#avPlots(lm(score~alcohol_pc + region,data=dat))
+```
+
+#Analysis
+
+We will utilize a one-way analysis of covariance (ANCOVA) to identify whether the mean happiness score differs between region after considering the effect of alcohol consumption. The hypotheses we will utilize are as follows:
+
+Hypotheses: 
+$$Ho: \mu_{1} = \mu_{2} = \mu_{3} = \mu_{4} $$
+$$Ha: At\ least\ one\ mean\ is\ different\ from\ the\ rest\ $$
+
+Where $\mu_{i}$ (i = 1,2,3,4) are the mean happiness scores after adjustment for per-capita alcohol consumption for the following regions, respectively: Americas, Asia Pacific, Europe, and Middle East/Africa. 
+
+Before proceeding, we need to consider the assumptions of the one-factor ANCOVA procedure. First, we will identify whether there is a significant interaction between region and alcohol consumption. The results of an F test to determine whether there is a significant interaction between these two variables is displayed in the table below. 
+```{r echo=FALSE,results='asis',table.cap="F Test for interaction between region and alcohol consumption per capita"}
+#check that there is not a significant interaction between region and alcohol_pc
+aov_check <- aov(score ~ region*alcohol_pc,data=dat)
+print(xtable(aov_check),comment=FALSE)
+```
+
+We can see from the above table that there is not a significant interaction between yearly alcohol consumption per capita and region of the world. This means that we will not have to consider an interaction between these variables in our ANCOVA procedure. 
+
+The next assumption we will make is that relationships are linear. We can see from the scatterplot above that, for each region, it is reasonable to say that alcohol consumption and happiness have a linear relationship. Next, we assume that happiness scores are destributed normally for each region. Instead of looking at all four regions, we will instead fit a linear model, including `alcohol_pc` as a covariate, and determine whether the residuals are normally distributed. The model is shown below: 
+$$ score = \alpha + \beta_{alcohol} + \beta_{region} + \epsilon,\ \epsilon \sim N(0,\sigma^2)$$
+A histogram of the residuals from this model is displayed below. 
+
+```{r echo=FALSE, fig.height=2.5,fig.width=4,position="center"}
+#Normality of residuals
+model <- lm(score~ alcohol_pc + region, data = dat)
+std_res <- (model$residuals - mean(model$residuals))/sd(model$residuals)
+
+ggplot(dat,mapping=aes(x=std_res)) + geom_histogram(aes(y=..density..),color="black",fill="lightblue",bins=25) + 
+  geom_density(lwd=0.7) + labs(x="Standardized Residuals",y="Count") + theme_bw()
+
+ks <- ks.test(std_res,"pnorm") #residuals are definitely normally distributed (fail to reject)
+#homogeneity of residuals by group
+ltest <- leveneTest(model$residuals~region,data=dat)
+pv <- ltest$`Pr(>F)`[1] %>% round(3)
+#not significant so we can assume homoegeniety of variances of residuals for each region
+```
+
+In addition to the above plot, which appears normally distributed, we conducted a Kolmogorov-Smirnov test for normality, which resulted in a p-value of `r ks$p.value`, leading us to fail to reject the null hypothesis that the residuals are distributed normally. The final assumption of our ANCOVA procedure is a constant variance of happiness scores between regions. Equivalently, we can look at the variances of the residuals from the model that includes alcohol consumption as a covariate (i.e. controls for the effects of alcohol consumption) with respect to region. We utilized Levene's test for homogeneity of variance, which returned a p-value of `r pv`, leading us to fial to reject the null hypothesis that the variances of scores for each region are equal. We can confirm that the conditions for the ANCOVA procedure are met. 
+
+We fit an ANOVA model with type III sums of squares (because we want to control for the effect of alcohol consumption) in order to evaluate the difference in happiness score between regions. The results are shown below. 
+```{r echo=FALSE,results='asis'}
+#conduct ANOVA
+#compute anova by controlling for the effects of alcohol_pc first 
+res.aov <- Anova(model,data=dat,type="III")
+print(xtable(res.aov),comment=FALSE)
+```
+
+The covariate, alcohol per capita, was significantly related to the happiness score after controlling for the effect of region. However, we are interested in the effect of region on happiness score. There was also a significant effect of region on the happiness score after controlling for the effect of alcohol consumption. In other words, after adjustment for alcohol consumption per capita, there was a statistically significant difference in happiness score between the groups. In order to analyze where these differences are taking place in the model, we will consider the marginal means for each region. The table below shows the marginal mean happiness score, along with associated 95% interval lower and upper bounds, for each region. We can see that the Americas had the highest marginal mean happiness score, while the Middle East/Africa had the lowest. These means, and their associated intervals, are plotted below. 
+
+```{r echo=FALSE}
+#get marginal means
+emm <- emmeans(model,specs="region")
+pairs2 <- pairs(emm)
+emm  <- emm %>% as.data.frame()
+df0 <- emm[,c(1,2,5,6)]
+df0$emmean <- df0$emmean %>% round(3)
+df0$lower.CL <- df0$lower.CL %>% round(3)
+df0$upper.CL <- df0$upper.CL %>% round(3)
+colnames(df0) <- c("Region","Est. Marginal Mean","Lower Bound","Upper Bound")
+kable(df0) %>% kable_styling(position = "center")
+```
+
+```{r echo=FALSE, fig.width=4.5,fig.height=3}
+#plot marginal means and their associated CIs
+df <- data.frame(x =c(1,2,3,4),
+                 est = emm[,2],
+                 lowvals = emm[,5],
+                 upvals = emm[,6])
+
+ggplot(df, aes(x = as.factor(x), y = est)) +
+  geom_errorbar(aes(ymax = upvals, ymin = lowvals),width=0.2,color="darkblue",lwd=0.75) +
+  geom_point(size=1.6,color="red") + coord_flip() +
+  labs(y="Estimated Marginal Mean Happiness Score",x="") +
+  scale_x_discrete(breaks = c("1","2","3","4"), labels=c("Americas","Asia Pacific","Europe","Middle East/Africa")) +
+  theme_bw()
+  
+
+```
+
+We can see that the mean happiness score for the Middle East/Africa is significantly lower than all the other scores, as its 95% confidence interval does not overlap the intervals for any of the other regions. Furthermore, we wanted to analyze the pairwise differences of these marginal means and associated significance. The table below shows the difference in marginal means for each possible regional pair. Again we can see that the significant differences of marginal means are only those pairs that involve the middle East/Africa. 
+```{r echo=FALSE}
+#pairwise differences of marginal means
+pairs2 <- as.data.frame(pairs2)
+df <- pairs2[,c(1,2,6)]
+colnames(df) <- c("Contrast Pair","Difference","P-Value")
+df$`P-Value` <- df$`P-Value` %>% round(3)
+df$Difference <- df$Difference %>% round(3)
+
+kable(df) %>% kable_styling(position="center")
+
+```
+
+# Conclusion 
+Based on our analysis of covariance, we conclude that the mean happiness score for the Middle East/Africa is significantly lower than the mean happiness scores for the Americas, Europe, and the Asia Pacific region, when controlling for the effect of alcohol consumption on happiness. In other words, where you live in the world has a significant effect on happiness score when controlling for the effects of alcohol consumption. However, we also acknowledge that there are many, many other possible variables that contribute to happiness levels that could change or alter these results if they were included in our analysis. Regardless, our results support those of the World Happiness Report: average happiness levels differ across the world. Though we also note that happiness is of itself a personal endeavor, and happiness can usually be found regardless of circumstance. 

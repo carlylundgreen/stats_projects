@@ -1,0 +1,130 @@
+---
+title: "Alcohol-Impaired Driving:"
+subtitle: "Analysis of Two Means"
+author: "Carly Lundgreen"
+output: pdf_document
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.pos="H")
+options(scipen=999) #suppress scientific notation
+setwd("~/Grad_School/535")
+```
+
+```{r echo=FALSE,include=FALSE}
+library(dplyr)
+#library(formattable)
+library(ggplot2)
+library(kableExtra)
+library(usmap)
+library(gridExtra)
+```
+
+
+# Introduction and Data Description 
+```{r echo=FALSE}
+deaths <- read.csv("driving_deaths.csv",header=TRUE,sep=",")
+dat <- deaths[,-c(3,4)] %>% as.data.frame() #we only want state and number of deaths
+dat <- dat[dat$State != "DC",] #drop DC
+colnames(dat) <- c("state","deaths")
+#add in the 2018 data
+dat$deaths2018 <- c(34,421,153,307,246,20,199,334,125,240,1439,28,120,87,66,163,85,166,267,79,48,137,45,42,122,35,134,814,105,375,227,115,15,291,58,145,294,88,243,216,29,108,1069,188,57,240,61,309,29,285)
+
+dat$avg_deaths <- dat$deaths/9 #create new variable, the 9 year average # of deaths
+dat <- dat[,-2] #drop deaths column 
+```
+  The CDC reports that in 2018, 10,511 people were killed in alcohol-impaired driving (AID) crashes in the United States, which accounted for 29% of all traffic-related deaths in the country that year, and based on state-level data, this ends up being an average of about 210 deaths per state that year. According to the CDC, rates of AID and alcohol-involved fatal crashes have gone down in recent years. However, alcohol-impaired drivers still got behind the wheel of vehicles about 147 million times in 2018. Needless to say, alcohol-impaired driving is a very significant problem on US roadways, with consequences reaching far beyond these fatality numbers. 
+
+  We are interested in discovering whether the CDC's claim that deaths from AID has decreased significantly in recent years is supported by these data. It is important to note that an 'alcohol-impaired driver' has been defined as a driver with a blood-alcohol level that is above 0.08 g/dL. The data for this analysis was retrieved from the CDC website. The dataset provides the number of people killed in alcohol-impaired driving crashes from 2003-2012 by state. The number of deaths has been aggregated so that there is a single variable, `deaths`, for the entire 9-year period. We opted to calculate the 9-year average for each of the states and create a new variable, `avg_deaths`. We will compare the state-by-state 9-year average to the state-by-state number of deaths from AID in the year 2018, which data was also retrieved from the CDC's website.  
+
+# Exploratory Data Analysis 
+
+  Table 1, shown below, compares summary statistics for the 9-year average number of deaths per state due to alcohol-impaired driving (2003-2012) and the average number of deaths per state from AID in 2018. We can see that both the median and mean deaths decreased over time, which does appear to support the CDC's claim. In Figure 1, we have mapped AID deaths by state for both the 9-year average and the 2018 values. To the naked eye, these maps appear identical, indicating that the distributions of deaths likely has not changed very significantly between each time period. That is, states that had very high numbers of deaths still have high numbers of deaths, and states that had low numbers of deaths still have low numbers of deaths. Figure 2, on the following page, displays the distributions of deaths for each time period in side-by-side boxplots. Three outliers can clearly be seen for each group. These outliers for AID deaths, in both cases, are in the states of Florida, California, and Texas, respectively. These states can easily be spotted in Figure 1 with high numbers of deaths in both time periods. We will discuss these outliers further in the following section. 
+
+```{r echo=FALSE}
+nums <- dat$avg_deaths
+nums2018 <- dat$deaths2018
+summaries <- data.frame( 
+                Mean = mean(nums) %>% round(2),
+                SD = sd(nums) %>% round(2),
+                Median = median(nums),
+                IQR = IQR(nums),
+                Min = min(nums),
+                Max = max(nums)
+               )
+summaries2018 <- data.frame( 
+                Mean = mean(nums2018) %>% round(2),
+                SD = sd(nums2018) %>% round(2),
+                Median = median(nums2018),
+                IQR = IQR(nums2018),
+                Min = min(nums2018),
+                Max = max(nums2018)
+               )
+dat_summary <- rbind(summaries %>% round(2),summaries2018)
+rownames(dat_summary) <- c("2003-2012","2018")
+kable(dat_summary,caption="Summary statistics for AID deaths by state for both 2018 and the average over the 9-year period 2003-2012") %>% kable_styling(position="center")
+```
+
+```{r echo=FALSE, fig.width=6,fig.height=4,fig.cap="AID Deaths Mapped by State"}
+p1 <- plot_usmap(regions = "states",data=dat,values="avg_deaths") + 
+  labs(title = "Average Number of AID Deaths for the Period 2003-2012") +
+  scale_fill_continuous(low = "red", high = "yellow",name="AID Deaths") + 
+  theme(legend.position = "right")
+
+p2 <- plot_usmap(regions = "states",data=dat,values="deaths2018") + 
+  labs(title = "Number of AID Deaths in 2018") +
+  scale_fill_continuous(low = "red", high = "yellow",name="AID Deaths") + 
+  theme(legend.position = "right")
+grid.arrange(p1,p2)
+
+```
+
+```{r echo=FALSE,fig.align='center',fig.width=5,fig.height=3,fig.cap="Distributions of the average number of AID deaths by state from 2003-2012 and the number of AID deaths by state in 2018."}
+#need long dataset
+Time_Period <- c(rep("2018",50),rep("2003-2012",50))
+vals <- c(dat$deaths2018,dat$avg_deaths)
+
+ggplot() + geom_boxplot(mapping=aes(x=Time_Period,y=vals,fill=Time_Period)) + 
+  coord_flip() + labs(x="Time Period",y="Average # of AID Deaths") + 
+  scale_fill_brewer(palette="Paired") + theme_bw()
+
+#which states are the outliers? - FL, CA, TX for both time periods
+ordered <- dat[order(dat$avg_deaths,dat$deaths2018),]
+
+```
+
+\break 
+
+# Analysis
+
+  To determine whether the CDC's claim is supported by these data, we will perform a two-sample t test for a difference in means. However, we must first consider the test assumptions before proceeding. The first assumption is that our samples are distributed normally, or that we have a large enough sample size to employ the Central Limit Theorem. In this case, we saw in the side-by-side boxplots that there are outliers in each group that cause a significant right-skewness. However, the sample size for each group is 50 (one observation for each state), which is large enough to conclude that the normality condition of this test is met. 
+
+  Secondly, we assume that the variances of both groups are equal. We will define 'equal' to mean that the larger sample standard deviation is not more than twice as large as the smaller sample standard deviation. For this analysis, that ratio is found to be `r sd(dat$avg_deaths)/sd(dat$deaths2018) %>% round(2)`, which is clearly less than 2, so we will assume that the variances are equal across both groups. 
+
+  Finally, this test assumes independence between observations. In this case, it feels reasonable to say that the number of AID deaths in one state is sufficiently independent of AID deaths in another state. There may be a small level of spatial correlation between neighboring states, however we are assuming that correlation to be neglible because it feels unlikely that the driving habits of people in one state significantly affect the driving habits of people in another state, even if the states share a border. 
+
+  Because we have confirmed that each of the assumptions have been sufficiently met, we will continue with the analysis. The hypotheses for this test are displayed below. 
+$$ H_{o}:\ \mu_{1} = \mu_{2}\   $$
+$$ H_{a}:\ \mu_{1} > \mu_{2}\ $$ 
+Where $\mu_{1}$ denotes the mean of the average number of AID deaths per state from 2003-2012 and $\mu_{2}$ denotes the mean number of AID deaths per state in 2018. We will use a significance level of $\alpha = 0.05$. 
+```{r echo=FALSE}
+test_it <- t.test(dat$avg_deaths, dat$deaths2018,alternative = "greater",var.equal = TRUE, conf.level=0.95)
+get_ci <- t.test(dat$avg_deaths, dat$deaths2018,alternative = "two.sided",var.equal = TRUE, conf.level=0.95)
+interval <- get_ci$conf.int %>% round(2)
+t_stat <- test_it$statistic %>% round(2)
+p_val <- test_it$p.value %>% round(2)
+
+summaries <- c(paste0("(",interval[1],",",interval[2],")"), t_stat, p_val) %>% t()
+colnames(summaries) <- c("95% CI", "Test-Stat", "P-value")
+
+```
+
+  The results of this one-sided two-sample t test are shown below. With a p-value of `r p_val %>% round(3)`, we fail to reject the null hypothesis. There is not significant evidence that the mean of the 9-year average AID deaths per state is greater than the mean of the number of AID deaths for 2018. The 95% confidence interval, shown in the table below, provides a plausible range of values for the difference in the means of each group. Because our hypothesis test was one-sided, this confidence interval should not be used to reject or fail to reject the null hypothesis of the test we performed. The confidence interval does, however, allow us to make a conclusion about a test with Ha: $\mu_{1} neq \mu_{2}$. Because zero is contained in the interval, we can conclude that there is not evidence that the mean number of AID deaths changed over time from 2003-2012 to 2018. 
+
+```{r echo=FALSE}
+kable(summaries) %>% kable_styling(position="center")
+
+```
+
+# Conclusion
+  It appears that these data do not provide significant evidence to support the CDC's claim that alcohol impaired driving deaths have signficantly decreased in recent years. Our first comparison group had 50 observations, one for each state, with each observation being the average number of AID deaths in that state for the period 2003-2012. Our second comparison group was simply the number of AID deaths per state in 2018. Because the data had already been aggregated over the 9-year period, it made interpretation of this analysis a bit more complex than a simple comparison of two years, say 2015 and 2018. Even though we did not find that the mean for 2018 was smaller than the mean for 2003-2012, we can still observe that there does seem to be a decreasing trend in the number of AID deaths, which is still a trend in the right direction. Based on these results, we could potentially argue for the need to look into whether current alcohol-impaired driving laws are really taking care of the issue, or at least we could argue for the need to look into the issue further to see whether AID deaths are truly decreasing. Perhaps they have only been decreasing over the last couple of years, which we did not look at in our analysis. Either way, it is certainly an interesting result.

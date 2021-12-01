@@ -1,0 +1,385 @@
+---
+title: "Linear Modeling:"
+subtitle: "The Normality Assumption"
+author: "Carly Lundgreen"
+date: "December 10, 2020"
+output: pdf_document
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.pos="H")
+options(scipen=999) #suppress scientific notation
+setwd("~/Grad_School/535")
+set.seed(456)
+```
+
+```{r echo=FALSE,include=FALSE}
+library(dplyr)
+library(ggplot2)
+library(kableExtra)
+library(gridExtra)
+library(xtable)
+library(ggpubr)
+library(car)
+library(MASS)
+```
+
+# Motivation
+
+  When fitting a linear model, multiple assumptions about the nature of the data, normally understood in the form of model diagnostics, are made. One of these assumptions is that the calculated residuals from the linear model are normally distributed. We are interested in discovering how a violation of this normality condition may affect the model's average prediction error, the width of 95% confidence intervals, and the proportion of these intervals that would actually contain the parameter of interest--which we refer to as the confidence interval coverage. 
+
+### Data Introduction
+  The National Cancer Institute reports that the average cost of a pack of cigarettes in the United States is \$6.28. This price tag implies that someone with a pack-a-day habit is set back \$188 every month, or \$2,292 per year, on average. This is not a small cost--some used cars can be purchased with that sum of money. For others, it could equate to multiple months of rent or a downpayment on a house or apartment.The dataset that we will discuss reports the monthly income (`Income`) of 67 daily smokers and the dollar amount they spent the previous month on cigarettes (`Sales`). As part of the analysis, we fit the following linear model to these data:
+
+$$ Sales = \beta_{0} + \beta_{1}Income + \epsilon$$
+$$\epsilon \sim\ N(0,\sigma^2)$$ 
+
+### Assessing Normality
+  The model assumptions must be investigated before one proceeds with an analysis of the effect of `Income` on `Sales` ($\beta_{1}$). Our interest is in the normality assumption in particular, and we will approach an analysis of this assumption in two ways. One way to get a quick idea of the shape of the residuals' distribution is to simply plot a histogram. Oftentimes, when investigating model assumptions, it can be helpful to standardize the residuals before plotting. Standardization estimates the error associated with a particular observation while considering the leverage of that point in the calculation. 
+
+  Instead of standardizdation, we may want to calculate R-Studentized residuals. R-Studentized residuals scale the difference in observation and prediction by dividing by the standard deviation computed without that particular observation. Studentized residuals are useful in the identification of outliers and have the property that the studentized residual for each point will follow a t-distribution if the normality assumption of the SLR model is met. This analysis is not particularly interested in identifying outliers, and we are testing whether the normality assumption is met with this data, so we will calculate standardized residuals. A histogram of these residuals is shown below. 
+
+```{r echo=FALSE,fig.width=3,fig.height=2,fig.align="center",fig.cap="Histogram of Standardized Residuals"}
+cigs <- read.table(file ="C:/Users/Carly/Documents/Semester 6/Stat 330/Cigarettes.txt",sep="",header=TRUE)
+cigs <- data.frame(Income = cigs$Income,Sales=cigs$Sales)
+income <- as.matrix(c(cigs$Income,5432, 2567,2371,4980,4524,3354,5645,5754,7859,5647,4333,2341,3400,4560,5234,4999,4755,4678))
+sales <- as.matrix(c(cigs$Sales,189,124,99,156,122,137,175,158,255,245,199,57,105,235,213,187,255,223))
+
+dat <- cbind(income,sales) %>% as.data.frame()
+colnames(dat) <- c("Income","Sales")
+dat <- dat[-33,]
+dat <- dat[-29,]
+
+#fit model
+mod1 <- lm(Sales~Income,data=dat)
+
+#standardized residuals
+resids <- stdres(mod1)
+#histogram
+ggplot(mapping=aes(x=resids)) + geom_histogram(color="white",fill="red",bins=20) +
+  labs(x="SLR Model Residuals",y="Count") + theme_bw() 
+
+```
+
+  We can see that there does appear to be a right-skew to the residuals, so we can infer that the normality assumption is likely violated, but generally a histogram itself is not a perfect diagnostic for a departure from normality in the residuals. Hypothesis testing is another method to to evaluate this condition. 
+
+  There are multiple hypothesis tests that may be used to evaluate the normality assumption. One test, the Kolmogorov-Smirnov (KS) test, can be used to compare the empirical (data) CDF (or residuals in our case) to the CDF of a normal distribution. The null hypothesis test of the KS test is that the data follow a normal distribution, and the alternative is that they do not follow a normal distribution. Another hypothesis test that can be performed is the Shapiro-Wilk (SW) test. This test evaluates whether a sample follows a normal distribution specifically. Monte Carlo simulations have shown that the SW test is generally more powerful than the KS test for normality, so we will opt for an SW test here.
+
+```{r echo=FALSE}
+sw_pval <- shapiro.test(resids)$p.value %>% round(3)
+#ks_pval <- ks.test(resids,"pnorm")$p.value %>% round(3)
+
+```
+  The null hypothesis of the Shapiro-Wilk test is that the sample follows a normal distribution (the sample will be the residuals in this case). The p-value of the SW test was found to be `r sw_pval`, and at our significance level of 0.05, we reject the null hypothesis that the residuals are normally distributed. However, like most hypothesis testing procedures, if the sample size is very large this test may detect even trivial departures from the null hypothesis, so one more diagnostic by which to identify the shape of the residuals is a Q-Q plot. The Q-Q plot displays two sets of quantiles against one another. In our case, because we are evaluating a normal assumption, if both sets of quantiles came from a normal distribution, then the points should follow (roughly) a straight line. 
+
+  The Q-Q plot for this data is displayed below. 95% confidence interval bands are included for reference.
+```{r echo=FALSE,fig.width=3,fig.height=2,fig.align="center",fig.cap="Q-Q plot for Standardized Residuals"}
+library(ggpubr)
+ggqqplot(resids,color='springgreen3')
+
+```
+
+We can see some curvature in the Q-Q, which is a departure from roughly straight line that would be seen if the normality condition was met. Though the standardized residuals do not fall out of the confidence interval bounds, we can still see that the scatterplot does not form a sufficiently straight line. Due to the histogram of the residuals, the result of the Shapiro-Wilk test for normality, and the Q-Q plot, we can assume that the normality condition is not sufficiently met by these data.
+
+#Simulation Study 
+
+  We conducted a simulation study in order to investigate the effects of a normality assumption violation on confidence interval width, interval coverage, and root predictive mean squared error (RPMSE). As an overview, we generated n random values from 3 different skewed distributions, in addition to a normal distribution, for three different sample sizes (n): 10, 100, and 1000. These datapoints were utilized as the errors in a fitted SLR model. We calculated interval width and coverage, as well as RPMSE, and compared these metrics for the different distributions and sample sizes. The distributions that we compared were:
+
+* Normal with $\mu = 1$ and $\sigma^2 = 1$
+* Weibull with $\lambda = 1$ and $k = 1$ where $\lambda$ is the scale parameter and $k$ is the shape parameter
+* Gamma with $k = 1$ and $\theta = 1$, where $k$ is the scale parameter and $\theta$ is the shape parameter
+* Exponential with $\lambda = 1$, where $\lambda$ is the rate parameter
+
+For a visual reference, we generated 500 values from each of these distributions and created histgorams for comparison. We can see that the Weibull, Gamma, and Exponential distributions all have a significant right-skewness. By using each of these distributions as error distributions within an SLR model, we can effectively compare the effects of a normality assumption violation on the metrics we have chosen to analyze. 
+```{r echo=FALSE, fig.width=3.5,fig.height=3.5,fig.align="center",fig.cap="Histograms for 500 draws from the Comparison Error Distributions"}
+ e_norm <- rnorm(500,mean=1,sd=1)
+#mean 1, variance 1
+e_weib <- rweibull(500,scale=1,shape=1) 
+#exp value of weibull: scale*gamma(1 + 1/shape) = 1
+#variance of weibull: scale^2 * ( gamma(1 + 2/shape) - (gamma(1 + 1/shape))^2) = 1
+
+e_gamma <- rgamma(500,shape=1,scale=1) 
+#exp value of gamma: shape*scale = 1
+#variance of gamma: shape*scale^2 = 1
+e_exp <- rexp(500,rate=1)
+
+#plot historams
+g_norm <- ggplot(mapping=aes(x=e_norm)) + geom_histogram(aes(y=..density..),color="white",fill="springgreen3",bins=25) + 
+          geom_density(lwd=0.5) + labs(x="Normal Errors",y="Count") + theme_bw()  
+g_exp <- ggplot(mapping=aes(x=e_exp)) + geom_histogram(aes(y=..density..),color="white",fill="springgreen3",bins=25) + 
+  geom_density(lwd=0.5) + labs(x="Exponential Errors",y="Count") + theme_bw() 
+g_weib <- ggplot(mapping=aes(x=e_weib)) + geom_histogram(aes(y=..density..),color="white",fill="springgreen3",bins=25) + 
+  geom_density(lwd=0.5) + labs(x="Weibull Errors",y="Count") + theme_bw() 
+g_gamma <- ggplot(mapping=aes(x=e_gamma)) + geom_histogram(aes(y=..density..),color="white",fill="springgreen3",bins=25) + 
+  geom_density(lwd=0.5) + labs(x="Gamma Errors",y="Count") + theme_bw() 
+
+grid.arrange(g_norm,g_exp,g_weib,g_gamma,nrow=2,ncol=2)
+```
+
+The shape/scale/rate parameters for the skewed distribution examples were carefully selected so that the mean and variance of each of the distributions was equal to the mean and variance of the comparison Normal distribution. In order to calculate confidence intervals and the resulting width and coverage, as well as RPMSE, we fit the following simple linear model for each of the above error distributions, using the n datapoints as the $\epsilon$ vector in the SLR model outlined below. 
+$$ y = X\beta + \epsilon $$
+We have set the X matrix and **$\beta$** vector to be:
+
+$$ X = \begin{pmatrix}
+1 & 1 \\
+1 & 2 \\
+\vdots & \vdots \\
+1 & n \\
+\end{pmatrix},\
+\beta = 
+\begin{pmatrix}
+\beta_{0} \\
+\beta_{1} \\
+\end{pmatrix}
+=
+\begin{pmatrix}
+1 \\
+2 \\
+\end{pmatrix}$$
+
+For the study, we first created a function,`setup`, that takes only n, the sample size, as an argument. The function first generates n random datapoints from the distributions outlined above and combine them in an Nx4 matrix. Then, it creates the  $\beta$ vector and X matrix as outlined above. It then calculates y-values for each of the 4 distributions according to the SLR model $y = X\beta + \epsilon$, as well as $\hat{\beta}$ according to $\hat{\beta} = (X'X)^{-1}X'y$ for each of the error distributions. Within the function, another function is created that calculates 95\% confidence interval bounds for $\beta_{1}$, the effect of `Income` on `Sales`. The interval is calculated according to the formula 
+      $$ C\beta = C\hat{\beta} \pm t\sqrt{s^{2}C(X'X)^{-1}C'} $$
+      Where C is a 1x2 vector with respective elements 0 and 1, so that $C\beta = \beta_{1}$. Finally, the function calculates each of the $\hat{y}$ (prediction) vectors for the four error distributions according to $\hat{y} = X\hat{\beta}$ and returns the predictions, y-values, and 95\% confidence intervals for $\beta_{1}$.
+```{r echo=FALSE}
+sim_function <- function(N,sh1,sc1,sh2,sc2,mu,var,rate){
+  e_norm <- rnorm(N,mu,var)
+  e_weib <- rweibull(N,shape=sh2,scale=sc2) 
+  e_gamma <- rgamma(N,shape=sh1,scale=sc1)
+  e_exp <- rexp(N,rate=rate)
+ 
+  error_mat <- matrix(c(e_norm,e_gamma,e_exp,e_weib),nrow=N,ncol=4,byrow=FALSE)
+  
+  # get beta
+  betas <- matrix(c(1,2),nrow=2,ncol=1,byrow=FALSE) #we are choosing arbitrary b0 and b1
+  
+  # X matrix 
+  X <- as.matrix(cbind(rep(1,N),c(seq(1,N,length=N)))) #Nx2
+  
+  # get y-values 
+  ynorm <- X %*% betas + error_mat[,1] #1xN
+  ygamma <- X %*% betas + error_mat[,2]
+  yexp <- X %*% betas + error_mat[,3]
+  yweib <- X %*% betas + error_mat[,4]
+  
+  
+  # get betahats
+    bhat_norm <- solve(t(X) %*% X) %*% t(X) %*% ynorm #1x2
+    bhat_gamma <- solve(t(X) %*% X) %*% t(X) %*% ygamma
+    bhat_exp <- solve(t(X) %*% X) %*% t(X) %*% yexp
+    bhat_weib <- solve(t(X) %*% X) %*% t(X) %*% yweib
+  
+  
+  #c vector
+  c <- matrix(c(0,1),nrow=1,ncol=2,byrow=TRUE) #1x2
+  
+  #function to get confidence interval for beta1
+  ci_vals <- function(y,betahat,X,c){
+    s2 <- (1/(nrow(X)-ncol(X)))* (t(y-X%*%betahat) %*% (y-X%*%betahat))[1]
+    constant <- c %*% solve(t(X)%*%X) %*% t(c)
+    up <- (c%*%betahat)[1] + qt(1-.025,df=nrow(X)-ncol(X)) *sqrt(s2*constant)
+    low <- (c%*%betahat)[1] - qt(1-.025,df=nrow(X)-ncol(X)) *sqrt(s2*constant)
+    c(low,up) #1x2
+  }
+  
+  norm_ci_vals <- ci_vals(y = ynorm, betahat = bhat_norm, X=X,c=c) 
+  gamma_ci_vals <- ci_vals(y = ygamma,betahat = bhat_gamma,X=X,c=c)
+  exp_ci_vals <- ci_vals(y = yexp,betahat = bhat_exp,X=X,c=c)
+  weib_ci_vals <- ci_vals(y = yweib,betahat = bhat_weib,X=X,c=c)
+
+  
+  dat_mat <- cbind(norm_ci_vals,gamma_ci_vals,exp_ci_vals,weib_ci_vals) #2x4
+  colnames(dat_mat) <- c("","","","")
+  # calculate y-hats 
+  yhats_norm <- X %*% bhat_norm #Nx1
+  yhats_gamma <- X %*% bhat_gamma
+  yhats_exp <- X %*% bhat_exp 
+  yhats_weibull <- X %*% bhat_weib
+  
+  preds_mat <- cbind(yhats_norm, yhats_gamma,yhats_exp,yhats_weibull) #Nx4
+  colnames(preds_mat) <- c("Norm Preds","Gamma Preds","Exp Preds","Weibull Preds")
+
+  df <- cbind(preds_mat,ynorm,ygamma,yexp,yweib)  #Nx8
+  colnames(df) <- c(rep("",8))
+  
+  zero_mat <- matrix(0,nrow=2,ncol=4)
+  top_2_rows <- cbind(dat_mat,zero_mat) #zero_mat is just for conformability
+  
+  df2 <- rbind(top_2_rows,df)
+  colnames(df2) <- c("npreds","gpreds","epreds","wpreds","yn","yg","yt","yw")
+  df2
+}
+#######################################################
+```
+We then created another function, `replicate_sim`, which takes as input the output from the previous function as well as an argument `Nsim`, the number of simulations/draws from each of the above error distributions. This function accomplishes the following: 
+
+* Replicates the `setup` function `Nsim` times to generate `Nsim` $\hat{y}$ vectors of length N, `Nsim` y vectors of length n, and `Nsim` intervals for $\beta_{1}$
+* Extracts the `Nsim` interval bounds for each of the distributions used in the error terms and calculates the coverage of the intervals according to whether 2 (our chosen value of $\beta_{1}$) was included within the interval. 
+  + If 2 was contained in the interval, an alternate vector `is_in` was assigned a 1, and if not, `is_in` was assigned a zero. The mean of `is_in` was then calculated to return the proportion of intervals that contain the true value of $\beta_{1}$
+* Calculates the average width of intervals by returning, for each of the `Nsim` intervals (for each of the four distributions), the difference between the upper bound and lower bound of the interval. 
+  + The mean of these differences was then calculated to return the average width of the 95% confidence intervals. 
+* For each of the four distributions, the `Nsim` $\hat{y}$ and y vectors are used to calculate `Nsim` RPMSE values according to the following formula: 
+$$RPMSE\ =\ \sqrt{\frac{1}{n}\sum_{i=1}^{Nsim}(y_{i} - \hat{y_{i}})^2 }$$
+```{r echo=FALSE}
+
+replicate_sim <- function(replicates,Nsim){
+  reps_list <- lapply(seq(dim(replicates)[3]), function(x) replicates[,,x])
+  #extract ci_vals 
+  n_ci_vals <- g_ci_vals <- e_ci_vals <- w_ci_vals <- matrix(nrow=Nsim,ncol=2)
+  for(i in 1:Nsim){
+    n_ci_vals[i,] <- reps_list[[i]][1:2,1]
+    g_ci_vals[i,] <- reps_list[[i]][1:2,2]
+    e_ci_vals[i,] <- reps_list[[i]][1:2,3]
+    w_ci_vals[i,] <- reps_list[[i]][1:2,4]
+    
+  }
+  
+  get_cvg <- function(vec1){
+    is_in <- vector()
+    for(i in 1:Nsim){
+      is_in[i] <- (vec1[i,1] < 2 &  vec1[i,2] > 2)
+    
+    }
+    c(mean(is_in))
+  }
+  
+  cvgs <- c(get_cvg(n_ci_vals),get_cvg(g_ci_vals),get_cvg(e_ci_vals),get_cvg(w_ci_vals)) %>% as.data.frame()
+  
+  #get avg width of CIs 
+  get_width <- function(vec1){
+    dif1 <- vector()
+    for(i in 1:Nsim){
+      dif1[i] <- vec1[i,2] - vec1[i,1]
+      
+    }
+    c(mean(dif1))
+  }
+  
+  widths <- c(get_width(n_ci_vals),get_width(g_ci_vals),get_width(e_ci_vals),get_width(w_ci_vals)) %>% as.data.frame()
+
+  df <- cbind(cvgs,widths)
+  rownames(df) <- c("Normal","Gamma","Exponential","Weibull")
+  colnames(df) <- c("Coverage","Interval Width")
+  
+  #extract predictions
+  n_preds <- g_preds <- e_preds <- w_preds <- matrix(nrow=Nsim,ncol=nrow(reps_list[[1]])-2)
+  for(i in 1:Nsim){
+    n_preds[i,] <- reps_list[[i]][3:nrow(reps_list[[1]]),1]
+    g_preds[i,] <- reps_list[[i]][3:nrow(reps_list[[1]]),2]
+    e_preds[i,] <- reps_list[[i]][3:nrow(reps_list[[1]]),3]
+    w_preds[i,] <- reps_list[[i]][3:nrow(reps_list[[1]]),4]
+    
+  }
+ 
+  #extract y-values 
+  n_y <- g_y <- e_y <- w_y <- matrix(nrow=Nsim,ncol=nrow(reps_list[[1]])-2)
+  for(i in 1:Nsim){
+    n_y[i,] <- reps_list[[i]][3:nrow(reps_list[[1]]),5]
+    g_y[i,] <- reps_list[[i]][3:nrow(reps_list[[1]]),6]
+    e_y[i,] <- reps_list[[i]][3:nrow(reps_list[[1]]),7]
+    w_y[i,] <- reps_list[[i]][3:nrow(reps_list[[1]]),8]
+    
+  }
+  # get rpmse 
+  get_rpmse <- for(i in 1:Nsim){
+    n_rpmse <- sqrt(mean((n_preds[i,] - n_y[i,])^2))
+    g_rpmse <- sqrt(mean((g_preds[i,] - g_y[i,])^2))
+    e_rpmse <- sqrt(mean((e_preds[i,] - e_y[i,])^2))
+    w_rpmse <- sqrt(mean((w_preds[i,] - w_y[i,])^2))
+  }
+  rpmse_df <- c(n_rpmse,g_rpmse,e_rpmse,w_rpmse) %>% as.data.frame()
+  rownames(rpmse_df) <- c("Normal","Gamma","Exponential","Weibull")
+  colnames(rpmse_df) <- c("RPMSE")
+  list(df,rpmse_df)
+}
+
+```
+
+These two functions were then utilized to find the interval width, coverage, and RPMSE values for each of the sample sizes we are investigating (n=10, 100, and 1000). We ran the `setup` function three times, once for each sample size. Then, saving the output from each of the function calls, we ran the `replicate_sim` function using `Nsim` = 500. 
+
+### Simulation Study Results
+The results of the simulation study are illustrated in the below tables.
+```{r echo=FALSE, results='asis',warning=FALSE,message=FALSE}
+####################################################################################################
+
+#make sure that mean and variance of gamma/weibull always match the normal 
+Nsim <- 500
+#shape/scale for gamma and weibull: 1, mean and var for normal = 1, rate for exp = 1
+reps1 <- replicate(Nsim,sim_function(10,sh1=1,sc1=1,sc2=1,sh2=1,mu=1,var=1,rate=1)) #n = 10 
+
+reps2 <- replicate(Nsim,sim_function(100,sh1=1,sc1=1,sc2=1,sh2=1,mu=1,var=1,rate=1))  #n = 20
+#n = 20, shape/scale for gamma and weibull: 1
+reps3 <- replicate(Nsim,sim_function(1000,sh1=1,sc1=2,sc2=1,sh2=1,mu=1,var=1,rate=1))  #n = 1000
+
+
+#apply replicate_sim function to extract, interval width, coverage, and rpmse 
+r1 <- replicate_sim(reps1,Nsim)
+r2 <-replicate_sim(reps2,Nsim)
+r3 <-replicate_sim(reps3,Nsim)
+
+
+#get RPMSE Table 
+n1 <- r1[[2]] %>% as.data.frame() %>% t()
+n2 <- r2[[2]] %>% as.data.frame() %>% t()
+n3 <- r3[[2]] %>% as.data.frame() %>% t()
+rownames(n1) <- c("n1")
+rownames(n2) <- c("n2")
+rownames(n3) <- c("n3")
+rpmse_tab <- rbind(n1,n2,n3) %>% round(3)
+rownames(rpmse_tab) <- c("n = 10","n = 100","n = 1000")
+kable(rpmse_tab,format = 'pandoc',caption="RPMSE Values from 500 Simulations") %>% kable_styling(position="center",latex_options = "hold_position")
+
+#get cvg table 
+n1 <- r1[[1]] %>% t()
+n2 <- r2[[1]] %>% t()
+n3 <- r3[[1]] %>% t()
+
+n1 <- n1[1,] %>% as.data.frame() %>% t()
+n2 <- n2[1,] %>% as.data.frame() %>% t()
+n3 <- n3[1,] %>% as.data.frame() %>% t()
+rownames(n1) <- c("n1")
+rownames(n2) <- c("n2")
+rownames(n3) <- c("n3")
+cvg_tab <- rbind(n1,n2,n3) %>% round(3)
+rownames(cvg_tab) <- c("n = 10","n = 100","n = 1000")
+kable(cvg_tab,format = 'pandoc',caption="Mean 95% Confidence Interval Coverage") %>% kable_styling(position="center",latex_options = "hold_position")
+
+#get width table 
+n1 <- r1[[1]] %>% t()
+n2 <- r2[[1]] %>% t()
+n3 <- r3[[1]] %>% t()
+
+n1 <- n1[2,] %>% as.data.frame() %>% t()
+n2 <- n2[2,] %>% as.data.frame() %>% t()
+n3 <- n3[2,] %>% as.data.frame() %>% t()
+rownames(n1) <- c("n1")
+rownames(n2) <- c("n2")
+rownames(n3) <- c("n3")
+width_tab <- rbind(n1,n2,n3) %>% round(4)
+rownames(width_tab) <- c("n = 10","n = 100","n = 1000")
+kable(width_tab,format = 'pandoc',caption="Mean 95% Confidence Interval Width") %>% kable_styling(position="center",latex_options = "hold_position")
+```
+
+We can see from Table 1 that the RPMSE values are similar for when each of the four different distributions are used for $\epsilon$ in the SLR model. The highest RPMSE comes from the Gamma distribution at n = 1000. However, if we consider the range of the covariate column in the X matrix for a sample size of 1000, which is n-1 (999), being off in predictions by about 2 doesn't feel very significant. We see a similar pattern in Table 2, where all of the coverages appear to be approximately 95\%. This is what we would expect to see if calculating 95\% confidence intervals. It does not appear that changing either the sample size or the error distribution affects the coverage of the intervals. Finally, we can see in Table 3 that the width of 95% confidence intervals changes only with the sample size. The width of intervals are very similar for all four error distributions at constant sample size. 
+
+# Advice for Statistical Practice
+
+The simulation study showed that a violation of the normality assumption doesn't appear to have a large effect on prediction error, and hardly any effect on the width and coverage of 95% confidence intervals. For this reason, if the purpose of the analysis is to predict Sales from Income, assuming all other conditions of the SLR model are met, the normality assumption in this case would not have a very large effect on the accuracy of the predictions with respect to the RPMSE metric. Confidence intervals for $\beta_{1}$, the effect of Income on Sales, are also going to be about the same width regardless of the error distribution. 
+
+At very large sample sizes, the width of these intervals becomes very close to zero. The coverage of 95\% intervals appears to be independent of sample size and error distribution, so we can be confident that if we calculate 95\% confidence intervals for $\beta_{1}$, approximately 95\% of those intervals would contain the true effect of income on sales in repeated trials. It appears that the comparative success of t-procedures (like the one-sample t confidence interval for $\beta_{1}$ and predictions from linear regression models in sufficiently large samples is not very dependent upon the normality of the residuals. Confidence intervals behave how we expect them to behave in coverage, and width and RPMSE seem to be relatively unaffected as well. However, there are often simple solutions to taking care of the assumption of normality if the departure is extreme, and these solutions would be necessary to incorporate for a normality departure in a dataset with a very small sample size.
+
+A common method for dealing with a violation of the normality assumption is to perform a transformation on the response variable. Oftentimes, a log transformation sufficiently takes care of the skewness in the residuals. Note however, that the interpretation of $\beta_{0}$ and $\beta_{1}$ change with this transformation. We will calculate RPMSE, interval width, and coverage for our data, and compare with metrics from a log-transformed model. We can see based on the histogram below that the log-transformation does seem to have taken care of the skewness. A Shapiro-Wilk test on the standardized residuals reported a p-value of 0.839, indicating that the standardized do now follow a normal distribution. 
+
+```{r echo=FALSE,fig.width=3,fig.height=2,fig.align="center",fig.cap="Histogram of (Log) Standardized Residuals"}
+mod2 <- lm(log(Sales)~Income, data=dat)
+resids2 <- stdres(mod2)
+#histogram
+ggplot(mapping=aes(x=resids2)) + geom_histogram(color="white",fill="red",bins=20) +
+  labs(x="Log SLR Model Residuals",y="Count") + theme_bw() 
+low <- confint(mod1)[2,1] %>% round(3)
+up <- confint(mod1)[2,2] %>% round(3)
+```
+
+If the goal of the analysis is to retrieve a confidence interval for $\beta_{1}$, the skewness of the dataset will not significantly affect the width of that confidence interval or the expected 95\% confidence level. The dataset has a sufficiently large number of observations (generally, with the normality assumption, 'small' sample sizes would be less than approximately 10 observations, although this that is a different simulation study). If the goal is predicting a daily smoker's monthly amount spent on cigarettes based only on their income, the skewness of the data will not change the RPMSE very significantly. A 95\% confidence interval for $\beta_{1}$ for the SLR model applied to the untransformed dataset is found to be (`r low`,`r up`). 
+
+Note that, as part of this analysis, we did not check the assumptions of linearity, homeogeneity of variance, or independence of observations. These assumptions are also necessary to check before performing a full regression analysis and reporting results. We also note that there are other variables that very likely affect the amount of money spent on cigarettes (i.e. the price of cigarettes, length of the addiction, age, etc.), so if we want to increase the predictive power of this model, the addition of new and informative data would be most useful. 
+

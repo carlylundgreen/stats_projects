@@ -1,0 +1,128 @@
+---
+title: "Yellow Fever in Mali:"
+subtitle: "Anaysis of a Single Mean"
+author: "Carly Lundgreen"
+output: pdf_document
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.pos="H")
+options(scipen=999) #suppress scientific notation
+setwd("~/Grad_School/535")
+```
+
+```{r echo=FALSE,include=FALSE}
+library(dplyr)
+#library(formattable)
+library(ggplot2)
+library(kableExtra)
+library(usmap)
+library(gridExtra)
+```
+
+# Introduction and Data Description 
+
+According to the CDC, the yellow fever virus, which is primarily found in sub-tropical areas of Africa and South America, can cause illness ranging from a fever with mild aches and pains to severe liver disease accompanied by bleeding and jaundice. The disease originates from the bites of infected mosquitoes, and there is currently no anti-viral drug available to treat or cure infection. Preventative treatment, such as wearing protective clothing and receiving vaccinations, are essential to avoid contracting this virus. The WHO reports that 34 African countries are endemic for yellow fever, and a modeling study based on African data sources estimated the burden of yellow fever during 2013 was 84,000-170,000 severe cases and 29,000-60,000 deaths. This virus, however, is prevented by a very effective vaccine. The WHO states that one dose of the vaccine is sufficient to grant sustained immunity and life-long protection against the disease, although some studies say that a booster may be necessary after about ten years. Regardless, vaccination is incredibly important for the people living in regions that are endemic for yellow fever. 
+
+These data were gathered through a longitudinal cohort study that was conducted to measure long-term immunity against yellow fever in children vaccinated during infancy. A group of 587 healthy infants, each around the age of 9 months, were vaccinated in the country of Mali and followed for about 4.5 years. The concentration of yellow fever antibodies in each child was measured and recorded before vaccination and at the time of follow-up. A microneutralization assay was used to measure the amount of protective antibodies in each child. The concentration of antibodies was standardized with reference to the yellow fever WHO International Standard, and is reported in units of IU/mL. The international unit, IU, is a unit of measurement for the amount of a substance that is present in a sample. The mass or volume that constitutes an IU varies depending on the substance that is being measured, which makes conversion to standard metric measurements (such as grams) difficult. For this reason, we will keep the units of antibody concentration as IU/mL in our discussion. 
+
+So, just how effective is the yellow fever vaccine? We will attempt to discover whether there is a significant presence of antibodies for the average Malian infant after the (approximate) 4.5 year period following vaccination by performing a one-sample t test for the mean concentration of antibodies in the blood.
+
+
+# Exploratory Data Analysis
+```{r echo=FALSE}
+mali <- read.csv("Yellow_fever_nAb_Mali.csv",header=TRUE,sep=",")
+before <- mali[mali$Study == "PsA-TT-007",]
+after <- mali[mali$Study == "PERS-007",]
+
+dat <- cbind(before$SubjId,before$Age,before$Sex,after$DaysElapsed,before$Std.Concentr) %>% as.data.frame()
+colnames(dat) <- c("id","age","gender","days_elapse","antibodies_before")
+dat$antibodies_after <- after$Std.Concentr
+dat$gender <- ifelse(dat$gender == 2, "Male","Female")
+diffs <- after$Std.Concentr - before$Std.Concentr
+dat$diffs <- diffs
+```
+
+We first note that the standardized concentration measurement for yellow fever antibodies before vaccination was zero for each of the 587 children in the study, indicating the absence of antibodies pre-vaccination for each child. This means that the difference in antibody concentration is the same as the concentrations measured after the (approximate) 4.5-year period, so from this point on we will refer to the difference in antibody concentration (after vaccination minus before vaccination) simply as "antibody concentration." 
+
+The left plot in Figure 1. displayed below, illustrates the distribution of antibody concentrations for the 587 children after the end of their follow-up period. The significant right-skewness would be a concern to us if not for the large sample size of this study, which we will discuss in the following section. The distribution of the number of days elapsed since receiving the vaccination is displayed in the rightmost plot of Figure 1. This study did not follow up with each child at the same time, and we will consider this in the discussion of our results. For reference, red lines have been placed on the histogram to denote the 4, 4.5, and 5-year post-vaccination mark. 
+
+```{r echo=FALSE,fig.align='center',fig.width=8,fig.height=3,fig.cap="These plots show the distribution of antibody concentration after about 4.5 years for 587 Malian children and the distribution of the days elapsed since vaccination"}
+
+p1 <- ggplot() + geom_histogram(mapping=aes(x=diffs),color="black",fill="lightblue",bins=25) + 
+  labs(x="Antibody Concentration (IU/ml)") + theme_bw()
+
+p2 <- ggplot() + geom_histogram(mapping=aes(x=dat$days_elapse),color="black",fill="lightblue",bins=30) + 
+  labs(x="Days Elapsed Since Vaccination",y="Count") + theme_bw() + geom_vline(xintercept =365*4, color="red",lwd=1) + 
+  geom_vline(xintercept =365*5, color="red",lwd=1) + geom_vline(xintercept =365*4.5, color="red",lwd=1) + 
+  annotate("text", x = 365*4 + 30, y=42, label = "4 Yrs",size=4) + 
+  annotate("text", x = 365*4.5 - 33, y=42, label = "4.5 Yrs")+ 
+  annotate("text", x = 365*5 - 26, y=42, label = "5 Yrs")
+
+grid.arrange(p1,p2,ncol=2)
+```
+
+Figure 2, displayed below, explores the distribution of yellow fever antibody concentrations in infants by both gender and age. In this study, infants ages 9,10,11, and 12 months received yellow fever vaccinations for for the first time. After the (approximate) 4.5 year mark, we can clearly see that the children who received vaccinations at 9 months had a much larger spread of antibody concentrations in their blood than children vaccinated at 10, 11, or 12 months. We can also see that the spread of antibody concentrations for female infants was greater than the spread of antibody concentrations for male infants. However, this difference appears to arise from only a few outliers. The IQR for both male and female infants is comparable. A similar observation can be made about the distributions of antibody concentrations by age.
+```{r echo=FALSE,fig.align='center',fig.height=3.5,fig.width=6,fig.cap="Two plots showing the distributions of antibody concentrations by gender and by age"}
+
+p1 <- ggplot() + geom_boxplot(mapping=aes(x=dat$gender,y=dat$diffs,fill=dat$gender)) + 
+  labs(y="Gender",x="Antibody Concentration (IU/mL)") + 
+  scale_fill_brewer(palette="Paired",name="Gender") + theme_bw()
+
+p2 <- ggplot() + geom_boxplot(mapping=aes(x=as.factor(dat$age),y=dat$diffs,fill=as.factor(dat$age)))  + 
+  labs(y="Age (Months)",x="Antibody Concentration (IU/mL)") + 
+  scale_fill_brewer(palette="Paired",name="Age") + theme_bw()
+
+grid.arrange(p1,p2,ncol=2)
+```
+
+Finally, below is a table of summary statistics for the distribution of antibody concentrations. Note that the minimum antibody concentration was zero, indicating that one or more children still did not have yellow fever antibodies after receving the vaccine. This raises the question-under what conditions is a greater concentration of antibodies developed in the blood? This would be a potentially interesting route for further analysis of these data. For now, we will proceed with our analysis of the mean antibody concentration after the approximate 4.5 year period. 
+```{r echo=FALSE}
+summaries <- data.frame( 
+                Mean = mean(diffs) %>% round(2),
+                SD = sd(diffs) %>% round(2),
+                Median = median(diffs),
+                IQR = IQR(diffs),
+                Min = min(diffs),
+                Max = max(diffs)
+               )
+
+kable(summaries,
+      caption="Summary statistics for yellow fever antibody concentrations for Malian infants after vaccination") %>% kable_styling(position="center")
+```
+
+# Analysis
+
+Before beginning this analysis, we will examine whether the assumptions of a one-sample t procedure are sufficiently met. First, we consider independence. It appears reasonable to assume that antibody detection is independent between children. However, if children from multiple families were included in this study, there may be some level of dependence between those children in response to the vaccination based on genetic factors. Though the study does not provide information about whether some of the children came from the same family, I believe that that (potential) level of dependence is likely too small to matter in this scenario. Secondly, we will consider the condition of normality. Because our sample data is so clearly right-skewed, we rely on the Central Limit Theorem. Our sample size of 587 means that the sampling distribution of sample means will be sufficiently normal for us to utilize one-sample t procedures. The assumptions for a one-sample t procedure appear to be met, so we will proceed with the analysis. 
+
+A common concentration threshold to determine whether a blood sample is seropositive for yellow fever, which means it has detectable yellow fever antibodies, is 0.5 IU/mL. We will utilize this standard concentration to determine whether the mean antibody concentration for the 587 Malian children after receiving a yellow fever vaccine is greater than 0.5 IU/mL. In other words, we will analyze whether the average child has significantly detectable antibodies after being vaccinated (in this case approximately 4.5 years after being vaccinated). Our hypotheses for this test are below. Note that we will use a significance level of $\alpha$ = 0.5 for our analysis. 
+
+
+$$ H_{o}:\ \mu = 0.5\   $$
+$$ H_{a}:\ \mu > 0.5\ $$ 
+
+```{r echo=FALSE}
+test_it <- t.test(dat$diffs,mu = 0.5, alternative = "greater", conf.level=0.95)
+get_ci <- t.test(dat$diffs,alternative = "two.sided", conf.level=0.95)
+
+interval <- get_ci$conf.int %>% round(2)
+t_stat <- test_it$statistic %>% round(2)
+p_val <- test_it$p.value %>% round(2)
+
+summaries <- c(t_stat, p_val) %>% t()
+colnames(summaries) <- c("Test-Stat", "P-value")
+```
+
+The results of the test are displayed in the table below. The p-value of `r p_val` is clearly less than our significance level of 0.05, so we conclude that the mean concentration of yellow fever antibodies in children, about 4.5 years after receiving the vaccination as an infant, is greater than 0.5 IU/mL, the standard threshold for yellow fever seropositivity. For reference, we also calculated a 95% confidence interval for the average concentration of yellow fever antibodies, and this was found to be `r paste0("(",interval[1],",",interval[2],")")`, also in units of IU/mL.
+
+```{r echo=FALSE}
+kable(summaries,caption="Results from One-Sample t test for the mean yellow fever antibody concentration in Malawian infants") %>% kable_styling(position="center",latex_options=c("hold_position"))
+```
+
+
+# Conclusion 
+
+Based on the results of this test, the average yellow fever vaccination in Malian infants leads to seropositivity somewhere within approximately 4.5 years. The importance of yellow fever antibodies in sub-saharan African children cannot be overstated, as it nearly guarantees their immunity from the virus. This will lead to a significant increase in quality of life for these children and their families. We must consider, however, that some of the literature regarding yellow fever vaccinations seems to be questioning whether lifetime immunity is truly possible with a single vaccination in infancy. Some say that a booster may be needed after approximately ten years. 
+
+Because the follow-up times for this study were all less than five years, it would be interesting if antibody data could once again be gathered from these children to see whether the antibody concentrations had changed. We also note that the antibody measurements from this study were not taken in unison, but were spread out over a number of months. A potential space for further analysis could be to compare these study results to a study in which patient vaccination and follow-up took place at the same time, although in the world of clinical studies in sub-saharan Africa, this is likely not very feasible. Regardless, we can conclude that yellow fever vaccination in infancy does appear to lead to significant antibody concentration after the period of a few years. 
+

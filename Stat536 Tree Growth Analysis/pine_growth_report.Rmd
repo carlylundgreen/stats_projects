@@ -1,0 +1,390 @@
+---
+title: "Analysis of Lodgepole Pine Growth"
+author: "Carly Lundgreen"
+date: "March 16, 2021"
+output: pdf_document
+---
+
+```{r echo=FALSE,include=FALSE,message=FALSE,warning=FALSE}
+setwd("~/Grad_School/536")
+
+library(mgcv)
+library(gam)
+library(ggplot2)
+library(dplyr)
+library(nlme)
+library(MASS)
+library(multcomp)
+library(geoR)
+library(reshape2)
+library(car)
+library(gridExtra)
+library(kableExtra)
+source("https://raw.githubusercontent.com/MJHeaton/glstools/master/predictgls.R")
+source("https://raw.githubusercontent.com/MJHeaton/glstools/master/stdres.gls.R")
+
+set.seed(536)
+dat <- read.csv("LodgepoleInUintas.csv",header=TRUE,sep=",")
+colnames(dat) <- c("LON","LAT","Slope","Aspect","Elevation","Basal_Area") #rename response variable
+preddat <- dat[is.na(dat$Basal_Area) == TRUE,]
+pinedat <- dat[is.na(dat$Basal_Area) == FALSE,]
+
+```
+
+# Introduction 
+
+The Uinta Mountain Range and National Forest in Utah is home to a wide array of tree species. In recent years, wildfires and the Mountain Pine Beetle have caused significant damage to the forest. As part of the Forest Inventory Analysis (FIA), researchers are interested in understanding the health of the Uinta National Forest by evaluating the growth of trees in the area. The Lodgepole Pine is a particular tree species that, in Utah, is only found in the Uintas, and the health/growth of lodgepole lines can be used as an indicator of overall forest health. As a measure of tree growth, researchers measured the basal area of lodgepole pines at various locations throughout the Uintas. Additional environmental information--such as coordinate location, steepness of the mountain slope, aspect (compass direction of the slope), and elevation-- was recorded at the time of basal area measurement. The aims of this analysis are to understand how basal area is affected by the environment (slope, aspect, and elevation), explain the types of environments that are conducive to lodgepole pine growth, and predict basal area (a measure of tree size) for trees at locations where the FIA was unable to go. 
+
+This dataset had 192 rows with 78 missing basal area measurements. The operating dataset was created by including only the non-missing obserations and the statistical model that was fit to this operating dataset allowed us to impute the 78 missing basal area measurements. Latitude, Longitude, Slope, Aspect, and Elevation were all recorded by researchers as covariates in this dataset. The plot below illustrates the locations of each of the 114 basal area measurements. It appears that large basal area measurements tend to be near other large basal area measurements. This is most obvious near the (-110,40.9) coordinate location. These similarities in basal areas denote the likely presence of spatial correlation between these measures of tree size. This will be discussed in more detail in further sections. 
+```{r echo=FALSE,fig.width=5,fig.height=2.5,message=FALSE,fig.align="center"}
+#(exploratory stuff)
+middle <- mean(pinedat$Basal_Area)
+ggplot(mapping=aes(x=LON,y=LAT,color=Basal_Area),data=pinedat) + geom_point(size=2) + 
+  theme_bw() +
+  scale_color_gradient2(midpoint=middle, low="darkred", mid="orange",high="yellow") 
+
+```
+
+The (semi)variogram below shows that the variance of observations tends to increase as distance increases, which is indicative of spatial correlation present in these data. This will be accounted for in the statistical model that will be outlined in following sections. If spatial correlation is not accounted for, the standard errors associated with inference procedures will be inaccurate, meaning inferential conclusions will be invalidated. Prediction accuracy will also be decreased because we are ignoring an important component the distribution of the response variable.
+```{r include=FALSE,message=FALSE,fig.align="center"}
+######evidence of spatial correlation: 
+##Fit lm model and create variogram (explore initial spatial correlation)
+pine_lm <- lm(Basal_Area~Aspect + Slope + Elevation,data=pinedat)
+
+#variogram
+locations <- as.matrix(pinedat[,1:2])
+resids <- stdres(pine_lm)
+variogram <- variog(coords=locations,data=resids) %>% suppressWarnings()
+```
+```{r echo=FALSE,fig.width=4.5,fig.height=3,message=FALSE}
+
+plot(variogram,pch=19, col="navyblue",xlab="Distance",ylab="Semivariance") #as distance increases, variance tends to increase
+#there definitely looks to be spatial correlation here
+```
+
+The plots below illustrate the relationship between the response, basal area, and the covariates that are of interest to the researchers. Nonlinear relationships are obviously present between these variables and the response. For example, as aspect increases, basal area appears to decrease first and then begin to increase, on average. We will account for this nonlinearity in our statistical model in order to avoid inaccuracies in predictions. 
+
+```{r echo=FALSE, fig.width=7, fig.height=2.3, fig.align="center",message=FALSE,warning=FALSE}
+
+#more exploratory plots 
+p0 <- ggplot(mapping=aes(x=LON,y=Basal_Area),data=pinedat) + geom_point() + theme_bw() + geom_smooth(se=FALSE)
+p1 <- ggplot(mapping=aes(x=LAT,y=Basal_Area),data=pinedat) + geom_point() + theme_bw() + geom_smooth(se=FALSE)
+p2 <- ggplot(mapping=aes(x=Aspect,y=Basal_Area),data=pinedat) + geom_point() + theme_bw() + geom_smooth(se=FALSE)
+p3 <- ggplot(mapping=aes(x=Slope,y=Basal_Area),data=pinedat) + geom_point() + theme_bw() + geom_smooth(se=FALSE)
+p4 <- ggplot(mapping=aes(x=Elevation,y=Basal_Area),data=pinedat) + geom_point() + theme_bw() + geom_smooth(se=FALSE)
+grid.arrange(p2,p3,p4,ncol=3)
+#grid.arrange(p0,p1,ncol=2)
+```
+
+# Model Specification
+
+In order to unerstand the relationship between lodgepole pine growth and these environmental factors (as well as generate predictions of basal area), we will fit a generalized least squares model with an exponential correlation structure and variance nugget. Within the regression "portion" of the model, we have accounted for the nonlinearity among aspect, slope, and elevation through the use of smoothing splines. The model is outlined below: 
+
+$$y_{i} = \beta_{0} + s(x_{Aspect}) + s(x_{Slope}) + s(x_{Elevation}) + \epsilon, $$
+$$\epsilon \sim N(0, \sigma^2((1-w)R + wI))$$
+Where $y_{i}$ represents the $i^{th}$ basal area measurement and $\beta_{0}$ indicates the expected average basal area for a tree with zero aspect, zero slope, and zero elevation. This does not have valuable interpretation in the context of our analysis, so we will not report an estimate of $\beta_{0}$. Note that $s$ in the above model indicates the application of smoothing splines to each of the covariates. The smoothing spline process aims to identify a smooth function $g(x_{i})$, where $x_{i}$ is either aspect, slope, or elevation, where the quantity $\sum_{i=1}^n (y_{i} - g(x_{i}))^2$ is small. Specifically, the smoothing spline identifies the function that minimizes the penalized residual sum of squares: 
+
+$$\sum_{i=1}^n (y_{i} - g(x_{i}))^2 - \lambda \int g''(x)^2dx$$
+
+Where $\lambda$ is a "smoothness parameter" that penalizes the second derivative of $g$ so that the function is not overly erratic to avoid overfitting to the data. The ideal smoothness parameter is selected through cross validation techniques. The solution to the above expression is that $g(x_{i})$ is a natural cubic spline with knots at each $x_{i}$ with the coefficients then shrunk back towards zero. The main advantage to smoothing splines is that it is not necessary to select knot points because each $x_{i}$ is used as a knot. However, smoothing splines do not provide easily interpretable coefficients. Therefore, in order to understand the effects of aspect, slope, and elevation on basal area, we will evaluate whether the smoothing spline is significant (which would tell us how the covariates are behaving in relation to basal area). We will then evaluate univariate plots to determine these relationships. 
+
+In the model, **R** is an nxn matrix where the $ij^{th}$ elements are based on $\rho({s_{i}},{s_{j}})$, or the correlations between basal area measurements at differing locations. The elements of **R** are as follows: 
+
+$$R_{ij} = exp{\frac{-||s{i} - s{j}||}{\phi}}$$
+
+Where $\phi$ is a range parameter such that when $\phi$ increases, the spatial correlation between observations at locations $i,j$ also increases. Note also that $||s_{i} - s_{j}||$ indicates the Euclidean distance between two basal area observations. The 'nugget effect' is indicated by $w$ and allows for variability when $||s_{i} - s_{j}||$ = 0. If more than one observation is taken at a single location, it may not have perfect correlation with itself, especially if observations are taken years apart when the tree is likely to have grown between the two measurements. This nugget effect allows for sampling variability in these "same-distance" scenarios. The matrix **I** is an nxn identity matrix. Finally, the parameter $\sigma^2$ indicates the residual variance, or the variance between observations. Essentially, $\sigma$ is the amount that we expect the model to differ from the true basal area measurements on average. 
+
+The assumptions of this model include equal variance of the residuals (denoted by the constant $\sigma^2$ parameter described above) as well as normality of the residuals. The validity of these assumptions will be explored in the following section.
+
+# Model Justification 
+
+Our model excluded the use of Latitude and Longitude as fixed effects due to the researchers' interests in understanding, specifically, the effect of the environment on basal area. The latitude and longitude effect is accounted for in the modeling of the spatial correlation. 
+
+When deciding which nonlinear function to apply to the aspect, slope, and elevation variables, a generalized additive model (GAM) approach was taken. A "full model" was fit by applying a smoothing spline to each of the three covariates and adding these functions together. Note that while deciding which variables to include and whether a smoothing spline was needed, we did not consider the spatial corrleation. This effect was added after variable/function selection took place. We then evaluated the significance of the variable and the significance of the smoothing spline through Likelihood Ratio tests. "Reduced models" that 1) excluded the variable in question entirely and 2) included the variable linearly rather than with a smoothing spline were also fit for each of the three covariates to then compare to the full model via a likelihood ratio test.
+
+The p-values for each of these ANOVA tests was less than 0.001. This means that, in all cases, the "full model" was a better fit than the "reduced model". Therefore we kept all three covariates in the model with a smoothing spline.  
+
+```{r echo=FALSE, message=FALSE,warning=FALSE}
+#gams to evaluate (ie function selection)
+gamfull <- gam::gam(Basal_Area ~ s(LON) + s(LAT) + s(Slope) + s(Aspect) + s(Elevation),data=pinedat)
+
+#look at Slope 
+gam5 <- gam::gam(Basal_Area ~ Slope + s(Aspect) + s(Elevation),data=pinedat)
+gam6 <- gam::gam(Basal_Area ~  s(Aspect) + s(Elevation),data=pinedat)
+a3 <- anova(gamfull,gam5,gam6)
+#we need slope in the model and with a spline 
+pvals3 <- a3$`Pr(>Chi)`[-1] %>% round(3)
+
+#look at aspect
+gam7 <- gam::gam(Basal_Area ~ s(Slope) + Aspect + s(Elevation),data=pinedat)
+gam8 <- gam::gam(Basal_Area ~ s(Slope) + s(Elevation),data=pinedat)
+a4 <- anova(gamfull,gam7,gam8)
+#we need curvature on aspect in the model 
+pvals4 <- a4$`Pr(>Chi)`[-1] %>% round(3)
+
+#look at Elevation
+gam9 <- gam::gam(Basal_Area ~ s(Slope) + s(Aspect) + Elevation,data=pinedat)
+gam10 <- gam::gam(Basal_Area ~ s(Slope) + s(Aspect),data=pinedat)
+a5 <- anova(gamfull,gam9,gam10)
+
+#need curvature on Elevation in the model 
+pvals5 <- a5$`Pr(>Chi)`[-1] %>% round(3)
+
+####NOTE: not including lat or lon because we are asked in the research q's about how the ENVIRONMENT affects basal area
+#lon and lat (ie location) is useful to understand spatial correlation--we won't use it as a main effect
+#when we did use lat and lon as main effects, it said slope was not significant, but I don't think that makes sense
+#I would imagine that if the slope is super steep, very large and heavy trees won't grow there
+
+#var_tbl <- data.frame(Variable=c("Aspect","Slope","Elevation"),
+ #                     Anova1=c(pvals3[1],pvals4[1],pvals5[1]),
+  #                    Anova2=c(pvals3[2],pvals4[2],pvals5[1]))
+
+#kable(var_tbl) + kable_styling(position="center",latex_options="HOLD_position") 
+```
+
+After selecting the variables and applying smoothing splines, we used cross validation to determine the optimal smoothness parameter, $\lambda$, for each of the univariate fits between the covariates and basal area. These optimal values are included in the table below. 
+```{r echo=FALSE,message=FALSE,warning=FALSE}
+#which correlation structure to use? 
+expmod <- gls(Basal_Area ~ s(Aspect) + s(Elevation), data=pinedat,correlation = corExp(form = ~ LAT + LON,nugget=TRUE))
+gaussmod <- gls(Basal_Area ~ s(Aspect) + s(Elevation), data=pinedat,correlation = corGaus(form = ~ LAT + LON,nugget=TRUE))
+sphermod <- gls(Basal_Area ~ s(Aspect) + s(Elevation), data=pinedat,correlation = corSpher(form = ~ LAT + LON,nugget=TRUE))
+
+#compare AIC values
+#definitely need to use Gaussian 
+
+str_tb <- data.frame(Structure=c("Exponential","Gaussian","Spherical"),
+                     AIC=c(AIC(expmod),
+                           AIC(gaussmod),
+                           AIC(sphermod)))
+
+#kableExtra::kable(str_tb) + kable_styling(position="center",latex_options="HOLD_position")
+
+#we didn't learn gaussian correlation structure in lecture so using exponential correlation
+
+#to answer the research questions, we will intepret the significance of the smoothed terms 
+#(ie look at the univariate plots for patterns based on significance
+
+gls1 <- gls(Basal_Area~ s(Aspect) + s(Slope) + s(Elevation),data=pinedat) #really OLS (no error term modeling)
+
+#select smoothing parameter for univariate fits with cross validation 
+s1 <- smooth.spline(x = pinedat$Aspect, y = pinedat$Basal_Area, cv = TRUE)
+spar1 <- s1$spar %>% round(3)
+s2 <- smooth.spline(x = pinedat$Slope, y = pinedat$Basal_Area, cv = TRUE)
+spar2 <- s2$spar %>% round(3)
+s3 <- smooth.spline(x = pinedat$Elevation, y = pinedat$Basal_Area, cv = TRUE)
+spar3 <- s3$spar %>% round(3)
+
+#my model: 
+gls2 <- gls(Basal_Area~ s(Aspect) + s(Slope) + s(Elevation),data=pinedat,correlation=corExp(form=~LAT+LON,nugget=TRUE))
+
+#list smoothing parameters for each variable 
+spardf <- data.frame(Aspect=spar1,Slope=spar2,Elevation=spar3) %>% t()
+colnames(spardf) <- c("Smoothing Parameter")
+kable(spardf) %>% kable_styling(position="center",latex_options="HOLD_position")
+
+```
+
+The following table compares an ordinary least squares (OLS) fit that did not account for any spatial correlation to our selected model. AIC and BIC information criterions were reported due to the inference and prediction-focused goals of this analysis. The AIC and BIC values were both smaller for the GLS fit in comparison to OLS, which means that a model accounting for spatial correlation fits these data better. 
+```{r echo=FALSE,message=FALSE,warning=FALSE}
+#compare AIC values for OLS and GLS (to confirm we are on the right track)
+compare_IC <- data.frame(AIC=c(AIC(gls1),AIC(gls2)),
+                         BIC=c(BIC(gls1),BIC(gls2)))
+rownames(compare_IC) <- c("OLS","GLS")
+kable(compare_IC) %>% kable_styling(position="center",latex_options="HOLD_position")
+```
+
+```{r echo=FALSE}
+r2_pseudo <- cor(pinedat$Basal_Area, fitted(gls2))^2 %>% round(3)
+```
+Another metric that is indicative of model fit is a "Pseudo $R^2$" value, calculated as $R^2_{pseudo} = Cor(y,fitted(mod))^2$. This value can begin to give us an idea of the proportion of variation in basal area measurements that is explained by our model, according to the standard $R^2$ interpretation. Our calculated $R^2_{pseudo}$ was `r2_pseudo`, which does seem low. However, we only were provided three variables to explain variation in the basal area of lodgepole pines. In reality, there are many other variables that could explain the basal area of these trees. These variables may include time since last wildfire in the area, presence of mountain pine beetle damage, or soil quality. Because we only had three of dozens (or more) variables that can potentially explain lodgepole pine basal area, this $R^2_{pseudo}$ value is not overly concerning. 
+
+
+In order to evaluate the assumption of normality, we plotted a density curve of the standardized residuals from our model against the density curve of a standard normal random variable. It seems that there is a bit of a heavy right tail in comparison to the standard normal, a possible departure from normality, but the overal shape of the residuals is not a large cause for concern. 
+```{r echo=FALSE,fig.width=5,fig.height=3,message=FALSE,warning=FALSE,fig.align="center"}
+plotdf <- data.frame(Std_Resids=stdres.gls(gls2),Std_Normal=rnorm(mean=0,sd=1,n=114))
+pltdat <- melt(plotdf)
+
+ggplot(pltdat,aes(x=value, fill=variable)) + geom_density(alpha=0.3) + 
+  labs(x="Standard Deviation","Density") + 
+  ggtitle("Standardized Residuals vs. Standard Normal") +
+  theme(plot.title = element_text(hjust=0.5)) +
+  theme_bw()
+
+```
+
+We also plotted the standardized residuals against the fitted values from our model to evaulate the assumption of equal variance. No overly concerning patterns in the residuals are seen in the plot below, although there does seem to be some residuals near fitted values of ten that are more closely grouped together than residuals from other locations. However, this grouping is not overly extreme, so we will say that the equal variance assumption is met.  
+
+```{r echo=FALSE,fig.width=4.5,fig.height=3.5,message=FALSE,warning=FALSE,fig.align="center"}
+##check equal variance assumption
+ggplot(data=pinedat, mapping=aes(x=fitted(gls2),y=stdres.gls(gls2))) + 
+  geom_point(color="darkblue") + geom_abline(slope=0, intercept=0,size=1) +
+  ggtitle("Fitted Values vs. Residuals") + labs(x="Fitted Values",y="Standardized Residuals") + 
+  theme_bw() + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+```
+
+We also want to confirm that the residuals from the model have been sufficiently "decorrelated." The semivariogram below shos that the variance of observations does not increase wildy with an increase in distance between observations. It varies in a consistent pattern around a straight line, with a slight decrease in very far distances. The residuals from our model appear to be sufficiently decorrelated. 
+
+```{r include=FALSE}
+locations <- as.matrix(pinedat[,1:2])
+resids <- stdres.gls(gls2)
+variogram <- variog(coords=locations,data=resids)
+```
+
+```{r echo=FALSE,fig.width=4.5,fig.height=3,message=FALSE,warning=FALSE,fig.align="center"}
+plot(variogram,pch=19, col="navyblue",xlab="Distance",ylab="Semivariance") 
+abline(h=1,col="red",lty=2)
+
+```
+
+## Predictive Accuracy
+
+In order to assess predictive accuracy, we ran 50 cross validation studies on a training set of 20% of the data. We calculated the cross-validated root mean square error (RMSE), bias, average prediction interval coverage (i.e. what percent of prediction intervals actually contain the true value), and average prediction interval width for our model. These values are shown in the table below. 
+```{r echo=FALSE}
+##run 50 CV studies to assess predictive accuracy 
+n.cv <- 50
+n.test <- round(nrow(pinedat)*0.2)
+rpmse <- numeric()
+bias <- numeric()
+width <- numeric()
+cvg <- numeric()
+rpmse.lm <- numeric()
+bias.lm <- numeric()
+width.lm <- numeric()
+cvg.lm <- numeric()
+
+for(cv in 1:n.cv){
+  
+  test.obs <- sample(1:nrow(pinedat), n.test)
+  test.set <- pinedat[test.obs,]
+  train.set <- pinedat[-test.obs,]
+  
+  ##fit the gls model 
+  gls2.train <- gls(Basal_Area~ s(Aspect) + s(Slope) + s(Elevation), data=train.set,
+                    correlation=corGaus(form=~LAT+LON,nugget=TRUE))
+  train.lm <- lm(Basal_Area ~ Aspect + Slope + Elevation, data=train.set)
+  
+  ##predictions for the training set 
+  preds <- predictgls(gls2.train,newdframe = test.set) ##GLS preds
+  preds_lm <- predict.lm(train.lm, newdata = test.set,interval = "prediction")
+  
+  ##rpmse 
+  rpmse[cv] <- (preds$Prediction - test.set$Basal_Area)^2 %>% mean() %>% sqrt()
+  rpmse.lm[cv] <- (preds_lm[,'fit'] - test.set$Basal_Area)^2 %>% mean() %>% sqrt()
+  
+  ##bias 
+  bias[cv] <- (preds$Prediction - test.set$Basal_Area) %>% mean()
+  bias.lm[cv] <- (preds_lm[,'fit'] - test.set$Basal_Area) %>% mean()
+  
+  ##width 
+  width[cv] <- mean(preds$upr - preds$lwr)
+  width.lm[cv] <- mean(preds_lm[,'upr'] - preds_lm[,'lwr'])
+  
+  ##coverage
+  cvg[cv] <- ((preds$lwr < test.set$Basal_Area) & (preds$upr > test.set$Basal_Area)) %>% mean()
+  cvg.lm[cv] <- ((preds_lm[,'lwr'] < test.set$Basal_Area) & (preds_lm[,'upr'] > test.set$Basal_Area)) %>% mean()
+  
+}
+
+##compare predictive accuracy metrics from GLS and MLR models
+gls_metrics <- c(mean(rpmse),mean(bias),mean(width) , mean(cvg)) %>% round(3)
+ols_metrics <- c(mean(rpmse.lm), mean(bias.lm), mean(width.lm), mean(cvg.lm))
+#I mean, they're pretty similar (weirdly), so I'm just going to report GLS results 
+
+compare_table <- as.data.frame(gls_metrics) %>% t()
+colnames(compare_table) <- c("RPMSE","Bias","Width","Coverage")
+rownames(compare_table) <- c("")
+#the IQR is about 7.3, and on average we are off by about 4.5. This is probably not great, but not horrible
+#the width is pretty wide though
+kable(compare_table) %>% kable_styling(position="center",latex_options="HOLD_position")
+```
+
+The RPMSE indicates we are off in our predictions of basal area, on average, by about `r mean(rpmse)`. This is about two thirds of the IQR of our response variable, which is `r IQR(pinedat$Basal_Area)`. This is perhaps a bit higher than we would prefer, but not overly concerning. The bias indicates that we are underpredicting, on average, by `r abs(mean(bias))`. This is very small relative to the range of the response variable. The coverage of 95% prediction intervals, is on average `r mean(cvg)`, which is as expected. The average prediction interval width, however, is quite wide in relation to the range of the response variable, which is `r max(pinedat$Basal_Area) - min(pinedat$Basal_Area)`. This would, ideally, be narrower, but our model still has decent predictive ability. 
+
+# Results
+
+Because our model utilized smoothing splines, it lacks interpretable coefficients that can concisely explain the relationships between aspect, slope, elevation, and basal area. However, because we determined that smoothing splines were significantly necessary for each of the covariates in the model through likelihood ratio tests, we can evaluate the plots below to explain the relationship between our response and each of the covariates after adjusting for the other effects. Pseudo "added variable" plots were created, where each of the covariates and the response were adjusted for the other covariates and the residuals from these respective model fits plotted against each other.
+
+```{r  echo=FALSE, fig.width=7, fig.height=2.3, fig.align="center",message=FALSE,warning=FALSE}
+
+#Aspect vs Basal Area after controlling for other variables 
+
+no_aspect <- gls(Basal_Area~ s(Slope) + s(Elevation),data=pinedat,correlation=corGaus(form=~LAT+LON,nugget=TRUE))
+aspect_as_y <- gls(Aspect~ s(Slope) + s(Elevation),data=pinedat,correlation=corGaus(form=~LAT+LON,nugget=TRUE))
+resids_y <- stdres.gls(no_aspect)
+resids_x <- stdres.gls(aspect_as_y)
+
+g1 <- ggplot(mapping=aes(x=resids_x,y=resids_y)) + geom_point(size=2) + 
+  theme_bw() + labs(x="Aspect | Others",y="Basal Area | Others") + geom_smooth(se=FALSE)
+
+#control for Slope
+no_slope <- gls(Basal_Area~ s(Aspect) + s(Elevation),data=pinedat,correlation=corGaus(form=~LAT+LON,nugget=TRUE))
+slope_as_y <- gls(Slope ~ s(Aspect) + s(Elevation),data=pinedat,correlation=corGaus(form=~LAT+LON,nugget=TRUE))
+resids_y1 <- stdres.gls(no_slope)
+resids_x1 <- stdres.gls(slope_as_y)
+
+g2 <- ggplot(mapping=aes(x=resids_x1,y=resids_y1)) + geom_point(size=2) + 
+  theme_bw() + labs(x="Slope | Others",y="Basal Area | Others") + geom_smooth(se=FALSE)
+
+#control for elevation 
+no_elev <- gls(Basal_Area~ s(Aspect) + s(Slope),data=pinedat,correlation=corGaus(form=~LAT+LON,nugget=TRUE))
+elev_as_y <- gls(Elevation ~ s(Aspect) + s(Slope),data=pinedat,correlation=corGaus(form=~LAT+LON,nugget=TRUE))
+resids_y2 <- stdres.gls(no_elev)
+resids_x2 <- stdres.gls(elev_as_y)
+
+g3 <- ggplot(mapping=aes(x=resids_x2,y=resids_y2)) + geom_point(size=2) + 
+  theme_bw() + labs(x="Elevation | Others",y="Basal Area | Others") + geom_smooth(se=FALSE)
+
+grid.arrange(g1,g2,g3,ncol=3)
+
+```
+
+Based on the above plots, it appears that as aspect increases, basal area will, on average, decrease to a certain point and then begin to increase (on average). That shift appears to happen near the mean value of aspect, which was about 187. It doesn't appear that basal area, on average, changes very much as slope increases. If a relationship was to be gleaned, it seems that for small slopes, the average basal area is a bit higher than for very steep slopes. This is completely logical based on logic presented previously. It would not make sense for very large, and thus very heavy, trees to grow on extremely steep slopes. Finally, it seems that there is an average increase in basal area as elevation increases, although this increases seems to level off at very high elevations that are close to two standard deviations above average. This observation is consistent with research by the Utah State University ecology department, which states that "the Lodgepole pine is adapted to high mountain slopes at elevations usually above 6,000 feet." This adaptation appears to be present in our dataset, based on these results. Based on our model, it seems that higher elevations, up to a point, and very large aspects are most conducive to lodgepole pine growth. 
+
+Using our model, we obtained predictions for areas that FIA was not able to measure lodgepole pine basal areas. These predictions are presented in the plot below along with the observed/actual basal area measurements. Based on this plot, it seems that we generally predicted large basal measurements near other large basal measurements, which is what we would expect due to the spatial correlation that we observed in these data.
+
+```{r echo=FALSE, fig.width=5.6,fig.height=3.5,fig.align="center",message=FALSE,warning=FALSE}
+# Create and map predictions of the temperature at each location that was impeded by cloud cover.
+preds <- predictgls(gls2, newdframe = preddat)
+preds_integrate <- as.data.frame((preds[,-6])) #get rid of NA column 
+
+##integrate predictions with original data and plot together on a map: 
+colnames(preds_integrate) <- c("LON","LAT","Slope","Aspect","Elevation","Basal_Area","SE.pred","lwr","upr") #rename prediction column to be "Temp"
+preds_integrate <- preds_integrate[-(7:9)] 
+
+combined <- data.frame(rbind(pinedat,preds_integrate)) #combine predictions and original data
+combined$Type <- c(rep("Prediction",78),rep("Actual",114))
+ggplot(mapping=aes(x=LON,y=LAT,color=Basal_Area,shape=Type),data=combined) + geom_point(size=2) + theme_bw()
+
+```
+
+We also plotted these predictions and observations on a geographic map that illustrates the terrain of the Uintas relative to the Basal Area values. It does appear that the larger basal areas (denoted by the light blue dots) are located along a mountain ridge, which is consistent with our conclusion that elevation is conducive to lodgepole pine growth. Also, the red dot below indicates the location of the highest point in Utah, King's Peak, and we do not see very large basal area measurements near that peak. This supports our conclusion that the effect of elevation on basal area appears to level above a certain altitude. 
+```{r echo=FALSE,message=FALSE,warning=FALSE, fig.width=7,fig.height=4}
+
+library(devtools)
+library(ggmap)
+library(colorspace)
+#devtools::install_github("dkahle/ggmap")
+register_google(key="AIzaSyDB1RLOM0e8npEnjWlkXXXDOeBUDSUS1Ks")
+
+mybox <- c(left = -111.2, bottom = 40.45, right =
+                    -109.2, top = 41.03)
+mymap <- get_stamenmap(mybox,maptype="terrain")
+#bb <- make_bbox(lon=LON, lat=LAT, data=combined)
+#mymap2 <- get_map(location=bb, maptype="roadmap",zoom=9)
+
+ggmap(mymap) +
+  geom_point(data=combined, aes(x=LON,y=LAT,color=Basal_Area),size=1.7) + 
+  annotate("point",x=-110.3728,y=40.7764,color="red",size=2.2)
+
+```
+
+# Conclusion 
+
+By using smoothing splines to model the nonlinearity between aspect, slope, elevation, and basal area, as well as modeling the spatial correlation between tree basal area measurements using an exponential correlation function with variance nugget, we were able to better understand how the basal area of lodgepole pines is related to its environment via aspect, slope, and elevation. Similarly, we found that higher elevations appear to be conducive to lodgepole pine growth, until a certain point. Also, higher aspects are conducive to lodgepole pine growth. The relationship between slope and basal area was more difficult to ascertain. 
+
+The shortcomings of this model include the relatively few amount of covariates, which was discussed previously. Increasing the number of covariates used to explain basal area could provide a better model fit and potentially improve the "Pseudo $R^2$". Though our model had decent predictive ability, the prediction intervals were quite wide. Reduction of the standard error, potentially through more variables, would reduce the width of these intervals. Other functions could have been used to model the nonlinearity in these data, such as polynomial expansions, one-to-one transformations, or natural splines, and these functions may be better suited to these data. Further analysis of these data may include exploration of these alternative functions. Similarly, a Gaussian or Spherical correlation structure (as opposed to exponential) may have been worth exploring. 
+
+Overall, we have an idea of the conditions that are most conducive to lodgepole pine growth, and the predictions that we mapped above appear reasonable in relation to our inferential conclusions. A final note is that if researchers wish to understand overall forest health, perhaps other tree species are worth measuring apart from lodgepole pines. Currently, we can realistically only generalize these results to lodgepole pine growth, which may or may not be the best indicator of overall forest health in the Uintas. 
