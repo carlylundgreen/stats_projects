@@ -2,11 +2,13 @@
 Personal and school statistics projects from a few of my BYU statistics courses. 
 Those courses include Stat 469 (analysis of correlated data), Stat 435 (nonparametric statistics), and Stat 330 (introduction to regression). I used R for all analyses included in this repository. 
 
-**An explanation of the projects in this repository:**
+**Note:** Projects from my first year of the BYU statistics MS program are also included in this repository. Explanations for each of these projects are not yet written, but the MS courses include Stat 535 (Theory of Linear Models), Stat 536 (Statistical Learning and Data Mining), Stat 537 (Mixed Models), and Stat 624 (Computational Statistics). Projects from Stat 651 (Bayesian Methods) and Stat 637 (Generalized Linear Models) will be uploaded by January 2021. 
+
+**An explanation of some projects in this repository:**
 
 *Projects from the Correlated Data Analysis course:*
 
-1. Modeling home appraisals in Ames, IA, with a heteroskedastic spatial correlation model. A pdf and word document of the writeup is included, and the code for the project is included in a file called `Geospatial_Housing_Prices.R`. 
+1. Modeling home appraisals in Ames, IA, with a heteroskedastic spatial correlation model. A pdf and word document of the writeup are included, and the code for the project is included in a file called `Geospatial_Housing_Prices.R`. 
 
 2. Modeling levels of particulate matter exposure in children using a longitudinal multiple linear regression model. A word document of the writeup is included and the code for the project is in the file `Pollution_Project2.R`.
 
